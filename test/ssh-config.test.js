@@ -85,3 +85,13 @@ test('scanSshConfig: reads ~/.ssh/config and config.d, follows Include', async (
     await fs.rm(home, { recursive: true, force: true });
   }
 });
+
+test('parseSshConfig carries ProxyJump through for import mapping', () => {
+  const hosts = parseSshConfig('Host inner\n  HostName 10.0.0.2\n  User u\n  ProxyJump bastion\n');
+  assert.equal(hosts[0].proxyJump, 'bastion');
+});
+
+test('parseSshConfig exposes ProxyCommand so the importer can refuse it', () => {
+  const hosts = parseSshConfig('Host legacy\n  HostName 10.0.0.3\n  User u\n  ProxyCommand ssh -W %h:%p bastion\n');
+  assert.match(hosts[0].proxyCommand, /ProxyCommand|ssh -W/);
+});

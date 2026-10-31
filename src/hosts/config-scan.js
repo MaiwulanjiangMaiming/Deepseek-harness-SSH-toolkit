@@ -99,6 +99,7 @@ export function parseSshConfig(text) {
         user: options.user || '',
         identityFile: options.identityfile || '',
         proxyJump: options.proxyjump || '',
+        proxyCommand: options.proxycommand || '',
       });
     }
   }

@@ -170,6 +170,12 @@ export function mergeHostPatch(current, patch, id) {
   else if (cur.connectTimeoutMs !== undefined) next.connectTimeoutMs = cur.connectTimeoutMs;
   if (p.keepaliveIntervalMs !== undefined) next.keepaliveIntervalMs = Number(p.keepaliveIntervalMs);
   else if (cur.keepaliveIntervalMs !== undefined) next.keepaliveIntervalMs = cur.keepaliveIntervalMs;
+  if (p.proxyJump !== undefined) {
+    const jump = String(p.proxyJump).trim();
+    if (jump) next.proxyJump = jump;
+  } else if (cur.proxyJump) {
+    next.proxyJump = cur.proxyJump;
+  }
   return next;
 }
 
@@ -192,6 +198,10 @@ export function validateHostConfig(host) {
   if (!user) errors.user = 'required';
   const auth = host.auth && typeof host.auth === 'object' ? host.auth : {};
   if (auth.type !== 'key' && auth.type !== 'password') errors.auth = 'type';
+  if (host.proxyJump !== undefined) {
+    const jump = String(host.proxyJump).trim();
+    if (jump && jump === String(host.id ?? '')) errors.proxyJump = 'self';
+  }
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return { ok: true, value: host };
 }

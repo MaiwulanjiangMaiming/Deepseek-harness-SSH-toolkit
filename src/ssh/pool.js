@@ -237,9 +237,10 @@ export async function appendKnownHost(path, host, port, keyType, keyBase64, opts
 
 // ---------- SshConn ----------
 export class SshConn {
-  constructor(cfg = {}) {
+  constructor(cfg = {}, options = {}) {
     this.id = cfg.id ?? '';
     this.cfg = cfg;
+    this.options = options;
     this.client = null;
     this._ready = null;       // connect promise (idempotent)
     this._sftpPromise = null;
@@ -336,6 +337,7 @@ export class SshConn {
           knownHostsPath: this.cfg.knownHostsPath,
         }),
       };
+      if (typeof this.options.sock === 'function') opts.sock = await this.options.sock();
       const auth = this.cfg.auth;
       if (auth?.type === 'password') opts.password = auth.password;
       else if (privateKey) opts.privateKey = privateKey;
@@ -740,11 +742,19 @@ export class SshPool {
     this.conns = new Map();  // hostId -> SshConn
     this.waiters = [];
     this.disposed = false;
+    this.getHost = typeof options.getHost === 'function' ? options.getHost : () => undefined;
   }
 
   async acquire(cfg) {
+    return this._acquire(cfg, new Set());
+  }
+
+  /** Connect one host, tunnelling through its configured jump host first. */
+  async _acquire(cfg, seen) {
     if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
     const id = cfg.id ?? cfg.host;
+    if (seen.has(id)) throw new SshError({ hostId: id, stage: 'proxy-jump', message: 'ProxyJump cycle detected at "' + id + '"' });
+    seen.add(id);
     const existing = this.conns.get(id);
     if (existing) {
       // Only an explicitly dead connection (close event fired) is invalidated and rebuilt.
@@ -763,7 +773,22 @@ export class SshPool {
       // disposed pool never hands out a new connection.
       if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
     }
-    const conn = new SshConn(cfg);
+    let sock;
+    if (cfg.proxyJump) {
+      const jumpCfg = this.getHost(cfg.proxyJump);
+      if (!jumpCfg) throw new SshError({ hostId: id, stage: 'proxy-jump', message: 'ProxyJump host "' + cfg.proxyJump + '" is not configured' });
+      const jumpConn = await this._acquire(jumpCfg, seen);
+      sock = async () => {
+        await jumpConn.connect(); // reconnect the jump if it dropped
+        return new Promise((resolve, reject) => {
+          jumpConn.client.forwardOut('127.0.0.1', 0, cfg.host, cfg.port ?? 22, (err, stream) => {
+            if (err) reject(new SshError({ hostId: id, stage: 'proxy-jump', message: 'tunnel through "' + cfg.proxyJump + '" failed: ' + err.message, cause: err }));
+            else resolve(stream);
+          });
+        });
+      };
+    }
+    const conn = new SshConn(cfg, { sock });
     this.conns.set(id, conn);
     try {
       return await conn.connect();

@@ -201,3 +201,14 @@ test('display helpers and messageOf', () => {
   assert.equal(messageOf({ message: 'm' }), 'm');
   assert.equal(messageOf('raw'), 'raw');
 });
+
+test('proxyJump: merge keeps it and validation rejects self-reference', () => {
+  const merged = mergeHostPatch({ id: 'h1', name: 'a', host: 'h', user: 'u', auth: { type: 'key' } }, { proxyJump: 'h2' }, 'h1');
+  assert.equal(merged.proxyJump, 'h2');
+  const kept = mergeHostPatch(merged, { name: 'b' }, 'h1');
+  assert.equal(kept.proxyJump, 'h2');
+  const cleared = mergeHostPatch(merged, { proxyJump: '' }, 'h1');
+  assert.equal('proxyJump' in cleared, false);
+  assert.equal(validateHostConfig({ id: 'h1', name: 'a', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'h1' }).ok, false);
+  assert.equal(validateHostConfig({ id: 'h1', name: 'a', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'h2' }).ok, true);
+});

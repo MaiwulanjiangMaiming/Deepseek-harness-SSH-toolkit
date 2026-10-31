@@ -39,6 +39,7 @@ export const HostConfigSchema = z.object({
   knownHostsPath: z.string().optional().describe('known_hosts 路径; 缺省 ~/.ssh/known_hosts'),
   connectTimeoutMs: z.number().min(500).default(10_000).describe('连接超时(ms)'),
   keepaliveIntervalMs: z.number().min(1_000).default(15_000).describe('keepalive 间隔(ms)'),
+  proxyJump: z.string().optional().describe('跳板机 host id（指向另一台已配置主机，可链式多跳）'),
 });
 
 /**

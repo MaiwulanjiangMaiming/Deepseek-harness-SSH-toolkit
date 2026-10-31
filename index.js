@@ -20,7 +20,7 @@ export const name = 'dsh-ssh-toolkit';
 export class SshPoolService extends Service {
   constructor(ctx, config) {
     super(ctx, 'sshPool');
-    this.pool = new SshPool(config);
+    this.pool = new SshPool({ ...config, getHost: (id) => this.getHost(id) });
     this.hostsTable = null; // opened dsh-ssh-hosts `hosts` table (set from apply's inject)
   }
 

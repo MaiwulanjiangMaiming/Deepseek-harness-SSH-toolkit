@@ -71,8 +71,12 @@ export function shellQuote(value) {
 }
 
 /** argv for an interactive SSH shell that lands in `remoteCwd`. */
-export function sshTerminalArgv(host, remoteCwd) {
+export function sshTerminalArgv(host, remoteCwd, jumpHosts = []) {
   const args = ['-tt'];
+  if (Array.isArray(jumpHosts) && jumpHosts.length > 0) {
+    args.push('-J', jumpHosts.map((jump) => String(jump.user) + '@' + String(jump.host)
+      + (jump.port && jump.port !== 22 ? ':' + jump.port : '')).join(','));
+  }
   if (host.port && host.port !== 22) args.push('-p', String(host.port));
   if (host.auth && host.auth.type === 'key' && host.auth.privateKeyPath) {
     let keyPath = String(host.auth.privateKeyPath);
@@ -304,6 +308,21 @@ function installWorkspaceFiles(service, pool, scope) {
   return service;
 }
 
+/** Walk proxyJump references from the target upward (cycle-safe), nearest hop first. */
+export function jumpChain(getHost, host) {
+  const chain = [];
+  const seen = new Set([host?.id]);
+  let current = host;
+  while (current && current.proxyJump && !seen.has(current.proxyJump)) {
+    const next = getHost(current.proxyJump);
+    if (!next) break;
+    seen.add(next.id);
+    chain.push(next);
+    current = next;
+  }
+  return chain;
+}
+
 function installTerminal(subprocess, pool) {
   if (!subprocess || typeof subprocess.spawnTerminal !== 'function' || subprocess.__dshSshToolkitBridge) return subprocess;
   const original = subprocess.spawnTerminal.bind(subprocess);
@@ -316,7 +335,7 @@ function installTerminal(subprocess, pool) {
     if (!host) throw new Error('SSH host "' + target.hostId + '" is not configured; add it in Settings → SSH Connections');
     return original({
       ...spec,
-      argv: sshTerminalArgv(host, target.remotePath),
+      argv: sshTerminalArgv(host, target.remotePath, jumpChain((id) => pool.getHost(id), host)),
       cwd: os.tmpdir(),
       env: { ...(spec.env || {}), DSH_SSH_HOST: host.host, DSH_SSH_CWD: target.remotePath },
     });

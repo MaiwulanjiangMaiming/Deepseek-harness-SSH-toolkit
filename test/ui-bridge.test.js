@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote, uniqueUploadName, remoteTextWindow } from '../src/compat/ui-bridge.js';
+import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote, uniqueUploadName, remoteTextWindow, jumpChain } from '../src/compat/ui-bridge.js';
 import { defaultIdentity } from '../src/ssh/pool.js';
 import { promises as fsp } from 'node:fs';
 import { mapRemoteToLocal, encodeRemotePath } from '../src/workspace/router.js';
@@ -110,4 +110,25 @@ test('defaultIdentity prefers ed25519, then ecdsa, then rsa', async () => {
   } finally {
     await fsp.rm(home, { recursive: true, force: true });
   }
+});
+
+test('jumpChain is nearest-first and cycle-safe', () => {
+  const hosts = {
+    a: { id: 'a', proxyJump: 'b' },
+    b: { id: 'b', proxyJump: 'c' },
+    c: { id: 'c', proxyJump: 'a' },
+  };
+  assert.deepEqual(jumpChain((id) => hosts[id], hosts.a).map((h) => h.id), ['b', 'c']);
+  assert.deepEqual(jumpChain(() => undefined, hosts.a), []);
+  assert.deepEqual(jumpChain((id) => hosts[id], { id: 'solo' }), []);
+});
+
+test('sshTerminalArgv adds a -J chain before the target', () => {
+  const argv = sshTerminalArgv(
+    { host: 'target', port: 22, user: 'dev', auth: { type: 'key' } },
+    '/srv/app',
+    [{ host: 'jump1', port: 2222, user: 'ops' }, { host: 'jump2', port: 22, user: 'ops' }],
+  );
+  assert.deepEqual(argv.slice(argv.indexOf('-J'), argv.indexOf('-J') + 2), ['-J', 'ops@jump1:2222,ops@jump2']);
+  assert.ok(argv.includes('dev@target'));
 });
