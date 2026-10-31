@@ -25,7 +25,7 @@
 | | |
 |---|---|
 | **主机管理** | 设置页增删改、测试连接，可选跳板机；口令在 UI 侧只写不回显。 |
-| **多跳（ProxyJump）** | 通过引用另一台已配置主机的 `ProxyJump` 链路（带环检测），终端同样用 `ssh -J` 走同一条链。 |
+| **多跳** | 通过引用另一台已配置主机的 `ProxyJump` 链路（带环检测），或在本机执行 OpenSSH 风格的 `ProxyCommand`；终端同样用 `ssh -J` / `-o ProxyCommand`。 |
 | **配置导入** | 扫描 `~/.ssh/config`（含 `config.d`、`Include`）批量导入；缺 `User` 的条目会明确禁用而不是导进来跑不通。 |
 | **七个工具远端执行** | `bash`、`read`、`write`、`edit`、`read_image`、`glob`、`grep`，schema 不变。 |
 | **远端工作区** | 浏览远端目录并选为工作区；删除工作区时自动清理本地占位目录。 |
@@ -46,7 +46,7 @@
 | Node | ≥ 22 |
 | 远端系统 | Linux 或 macOS（只需 `sshd`，无需装 agent） |
 | 认证 | 密钥（路径或 ssh-agent）或口令 |
-| 拓扑 | 支持 `ProxyJump` 多跳（不支持 ProxyCommand） |
+| 拓扑 | 支持 `ProxyJump` / `ProxyCommand` 多跳 |
 
 ## 安装
 
@@ -103,7 +103,7 @@ test/                 307 个单元测试（node:test）
 
 - 口令**明文**存在 `dsh_ssh_hosts.json`（与上游相同取舍）；推荐用密钥，私钥本身不会被复制。
 - 终端的跳板链走本机 `ssh -J`，跳板机的认证来自系统 ssh 配置/agent（设置页里存的口令只用于最终目标）。
-- 不支持 `ProxyCommand`：这类条目会拒绝导入，并提示改配等效的跳板机。
+- `ProxyCommand` 会在本机通过 `/bin/sh` 执行你配置里的命令（与 OpenSSH 同一信任模型）；未配置过的命令不会被执行。
 - 远端 `grep` 基于 GNU grep，忽略规则与 `rg` 略有差异。
 - 不支持 Windows 远端。
 - 文件面板顶部的路径仍显示本地占位目录（远端路径已用于实际读写）；终端依赖本机 `ssh` 客户端。

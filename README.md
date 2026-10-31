@@ -31,7 +31,7 @@ An independent, DSH 0.2-native continuation of
 | | |
 |---|---|
 | **Host manager** | Add, edit, test, remove hosts from Settings → SSH Connections, including an optional jump host. Password is write-only in the UI. |
-| **Jump hosts** | Chain hops through `ProxyJump` host references (cycle-checked); the terminal follows the same chain with `ssh -J`. |
+| **Jump hosts** | Chain hops through `ProxyJump` host references (cycle-checked), or run an OpenSSH-style `ProxyCommand` locally; the terminal follows the same chain with `ssh -J` / `-o ProxyCommand`. |
 | **Config import** | Scans `~/.ssh/config` (+ `config.d`, `Include`) and imports in bulk; entries without a `User` are flagged instead of silently broken. |
 | **Seven routed tools** | `bash`, `read`, `write`, `edit`, `read_image`, `glob`, `grep` — same schemas, executed over SSH. |
 | **Remote workspaces** | Browse a remote directory, pick it, get a local placeholder workspace; deleting the workspace cleans the placeholder up. |
@@ -52,7 +52,7 @@ An independent, DSH 0.2-native continuation of
 | Node | ≥ 22 |
 | Remote OS | Linux or macOS (`sshd` only, no agent to install) |
 | Auth | key (path or ssh-agent) or password |
-| Topology | multi-hop via `ProxyJump` (ProxyCommand is not supported) |
+| Topology | multi-hop via `ProxyJump` or `ProxyCommand` |
 
 ## Install
 
@@ -112,8 +112,7 @@ settings namespace is exposed to the wire.
 - Passwords are stored **in plaintext** in `dsh_ssh_hosts.json` (same trade-off
   as upstream). Prefer keys; the private key itself is never copied.
 - Terminal jump chains use the local `ssh -J`, so hop credentials come from your system ssh config/agent (the stored password applies to the target only).
-- `ProxyCommand` is not supported: imports of such entries are refused with a
-  hint to configure an equivalent jump host.
+- `ProxyCommand` runs a local `/bin/sh` command from your host configuration — the same trust model as OpenSSH. It is never executed for a host you did not configure.
 - Remote `grep` uses GNU grep, so ignore rules differ slightly from `rg`.
 - Windows remotes are not supported.
 - The Files header still shows the local placeholder path (reads/writes go to the remote path); the terminal uses the local `ssh` client.

@@ -40,6 +40,7 @@ export const HostConfigSchema = z.object({
   connectTimeoutMs: z.number().min(500).default(10_000).describe('连接超时(ms)'),
   keepaliveIntervalMs: z.number().min(1_000).default(15_000).describe('keepalive 间隔(ms)'),
   proxyJump: z.string().optional().describe('跳板机 host id（指向另一台已配置主机，可链式多跳）'),
+  proxyCommand: z.string().optional().describe('在本机执行的 ProxyCommand（与 OpenSSH 相同，支持 %h/%p/%r）'),
 });
 
 /**

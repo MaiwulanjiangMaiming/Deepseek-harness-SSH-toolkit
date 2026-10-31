@@ -5,6 +5,8 @@
 import { Client } from 'ssh2';
 import { createHmac, createHash } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { Duplex } from 'node:stream';
 import os from 'node:os';
 import path from 'node:path';
 import { ExecFs } from './exec-fs.js'; // exec+base64 fallback used when SFTP is disabled
@@ -722,6 +724,26 @@ export class SftpWrapper {
 }
 
 // ---------- SshPool ----------
+/** Expand OpenSSH ProxyCommand tokens (%h/%p/%r/%%); ssh itself does the same for terminals. */
+export function expandProxyCommand(template, { host, port, user }) {
+  return String(template).replace(/%%|%[hpr]/g, (token) => {
+    if (token === '%%') return '%';
+    if (token === '%h') return String(host ?? '');
+    if (token === '%p') return String(port ?? 22);
+    return String(user ?? '');
+  });
+}
+
+/** Run a local ProxyCommand and expose its stdio as the ssh2 transport. */
+export function spawnProxyCommand(cfg) {
+  const command = expandProxyCommand(cfg.proxyCommand, { host: cfg.host, port: cfg.port ?? 22, user: cfg.user });
+  const child = spawn('/bin/sh', ['-c', command], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const stream = Duplex.from({ readable: child.stdout, writable: child.stdin });
+  child.on('error', (error) => stream.destroy(error));
+  stream.on('close', () => { try { child.kill(); } catch { /* already gone */ } });
+  return stream;
+}
+
 /** First conventional private key under ~/.ssh, in OpenSSH preference order. */
 export async function defaultIdentity(home = os.homedir()) {
   for (const name of ['id_ed25519', 'id_ecdsa', 'id_rsa']) {
@@ -774,7 +796,11 @@ export class SshPool {
       if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
     }
     let sock;
-    if (cfg.proxyJump) {
+    if (cfg.proxyCommand) {
+      // Same trust model as OpenSSH: the command comes from the user's own host
+      // configuration and runs through /bin/sh on this machine.
+      sock = async () => spawnProxyCommand(cfg);
+    } else if (cfg.proxyJump) {
       const jumpCfg = this.getHost(cfg.proxyJump);
       if (!jumpCfg) throw new SshError({ hostId: id, stage: 'proxy-jump', message: 'ProxyJump host "' + cfg.proxyJump + '" is not configured' });
       const jumpConn = await this._acquire(jumpCfg, seen);

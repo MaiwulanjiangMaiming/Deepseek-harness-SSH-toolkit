@@ -93,7 +93,8 @@ window.__ModuleLoader__.load({
       "field.proxyJump": "跳板机（ProxyJump）",
       "field.proxyJumpNone": "直连（不使用跳板）",
       "field.proxyJumpHint": "选择另一台已配置的主机作为跳板；跳板机自身也可以再配跳板，形成多跳。",
-      "detectUnsupported": "使用 ProxyCommand，暂不支持导入；请先配置等效的跳板主机",
+      "field.proxyCommand": "ProxyCommand（可选）",
+      "field.proxyCommandHint": "在本机通过 /bin/sh 执行，支持 %h/%p/%r；与 ProxyJump 同时配置时优先 ProxyJump。",
       "detectJumpMissing": "跳板机「{alias}」尚未导入，请先导入它",
       "detectJumpPending": "有 {count} 台主机的跳板机未就绪，暂未导入",
       "hostsCount": "{count} 台主机",
@@ -173,7 +174,8 @@ window.__ModuleLoader__.load({
       "field.proxyJump": "Jump host (ProxyJump)",
       "field.proxyJumpNone": "Direct connection",
       "field.proxyJumpHint": "Use another configured host as a jump box; that host may itself have a jump host for multi-hop chains.",
-      "detectUnsupported": "Uses ProxyCommand, which is not supported; configure an equivalent jump host first",
+      "field.proxyCommand": "ProxyCommand (optional)",
+      "field.proxyCommandHint": "Runs through /bin/sh on this machine, supports %h/%p/%r; ProxyJump wins when both are set.",
       "detectJumpMissing": "Jump host “{alias}” is not imported yet — import it first",
       "detectJumpPending": "{count} host(s) still need their jump host imported",
       "hostsCount": "{count} host(s)",
@@ -376,6 +378,7 @@ window.__ModuleLoader__.load({
       };
       if (form && form.knownHostsPath != null && String(form.knownHostsPath).trim()) cfg.knownHostsPath = String(form.knownHostsPath).trim();
       if (form && form.proxyJump) cfg.proxyJump = String(form.proxyJump);
+      if (form && form.proxyCommand != null && String(form.proxyCommand).trim()) cfg.proxyCommand = String(form.proxyCommand).trim();
       if (form && form.connectTimeoutMs) cfg.connectTimeoutMs = Number(form.connectTimeoutMs);
       return cfg;
     }
@@ -630,7 +633,6 @@ window.__ModuleLoader__.load({
       async function importDetected(entry) {
         var ssh = getSsh();
         if (!ssh || !entry) return;
-        if (entry.proxyCommand) { set({ detectError: sshT('detectUnsupported') }); return; }
         var jumpId = entry.proxyJump ? resolveJumpHostId(entry.proxyJump) : null;
         if (entry.proxyJump && !jumpId) { set({ detectError: sshT('detectJumpMissing', { alias: entry.proxyJump }) }); return; }
         var id = newHostId();
@@ -661,7 +663,7 @@ window.__ModuleLoader__.load({
       // Import every discovered entry that carries a user, jump hosts first so a
       // target's ProxyJump alias can resolve to the id imported just before it.
       async function importAllDetected() {
-        var pending = (store.getSnapshot().detected || []).filter(function (d) { return d.user && !d.proxyCommand; });
+        var pending = (store.getSnapshot().detected || []).filter(function (d) { return d.user; });
         var guard = 0;
         while (pending.length > 0 && guard++ < 50) {
           var rest = [];
@@ -679,7 +681,7 @@ window.__ModuleLoader__.load({
       }
 
       function beginAdd() {
-        set({ form: { mode: 'add' }, formData: { name: '', host: '', port: '22', user: '', authType: 'key', privateKeyPath: '', newPassword: '', proxyJump: '' }, formErrors: {}, testResult: null, error: null });
+        set({ form: { mode: 'add' }, formData: { name: '', host: '', port: '22', user: '', authType: 'key', privateKeyPath: '', newPassword: '', proxyJump: '', proxyCommand: '' }, formErrors: {}, testResult: null, error: null });
       }
       function beginEdit(id) {
         var hosts = store.getSnapshot().hosts || {};
@@ -696,6 +698,7 @@ window.__ModuleLoader__.load({
             privateKeyPath: (host.auth && host.auth.type === 'key' && host.auth.privateKeyPath) || '',
             newPassword: '',
             proxyJump: host.proxyJump || '',
+            proxyCommand: host.proxyCommand || '',
           },
           formErrors: {},
           testResult: null,
@@ -1288,7 +1291,13 @@ window.__ModuleLoader__.load({
             options: jumpOptions,
             onChange: function (v) { props.patchForm({ proxyJump: v }); }
           }),
-          React.createElement("div", { className: "dsh-hint tk-col-6" }, t("field.proxyJumpHint"))
+          React.createElement("div", { className: "dsh-hint tk-col-6" }, t("field.proxyJumpHint")),
+          React.createElement(Field, {
+            span: 6, label: t("field.proxyCommand"), value: data.proxyCommand || "",
+            placeholder: "ssh -W %h:%p bastion",
+            onChange: function (v) { props.patchForm({ proxyCommand: v }); }
+          }),
+          React.createElement("div", { className: "dsh-hint tk-col-6" }, t("field.proxyCommandHint"))
         ),
         React.createElement("div", { className: "tk-form-section" },
           React.createElement("div", { className: "tk-form-section-title" }, t("field.auth")),
@@ -1467,8 +1476,7 @@ window.__ModuleLoader__.load({
                     ),
                     React.createElement(Button, {
                       variant: "outline", size: "sm",
-                      disabled: !d.user || !!d.proxyCommand || state.importing != null,
-                      title: d.proxyCommand ? t("detectUnsupported") : undefined,
+                      disabled: !d.user || state.importing != null,
                       icon: busy ? React.createElement(IconLoadingOutlineRegular, { size: 14 }) : React.createElement(IconPlusOutlineRegular, { size: 14 }),
                       onClick: function () { props.importDetected(d); }
                     }, busy ? t("detectImporting") : t("detectImport"))
@@ -3026,3 +3034,4 @@ window.__ModuleLoader__.load({
     return { apply: apply, inject: inject };
   }
 });
+

@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-toolkit",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "SSH remote workspaces for DeepSeek Harness: connection pool, host manager with ~/.ssh/config import, and routed bash/file/search tools",
   "type": "module",
   "engines": {

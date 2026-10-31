@@ -76,6 +76,9 @@ export function sshTerminalArgv(host, remoteCwd, jumpHosts = []) {
   if (Array.isArray(jumpHosts) && jumpHosts.length > 0) {
     args.push('-J', jumpHosts.map((jump) => String(jump.user) + '@' + String(jump.host)
       + (jump.port && jump.port !== 22 ? ':' + jump.port : '')).join(','));
+  } else if (host.proxyCommand) {
+    // ssh expands %h/%p/%r in ProxyCommand itself.
+    args.push('-o', 'ProxyCommand=' + String(host.proxyCommand));
   }
   if (host.port && host.port !== 22) args.push('-p', String(host.port));
   if (host.auth && host.auth.type === 'key' && host.auth.privateKeyPath) {

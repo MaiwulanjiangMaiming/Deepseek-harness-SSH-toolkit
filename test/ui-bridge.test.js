@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote, uniqueUploadName, remoteTextWindow, jumpChain } from '../src/compat/ui-bridge.js';
-import { defaultIdentity } from '../src/ssh/pool.js';
+import { defaultIdentity, expandProxyCommand } from '../src/ssh/pool.js';
 import { promises as fsp } from 'node:fs';
 import { mapRemoteToLocal, encodeRemotePath } from '../src/workspace/router.js';
 
@@ -131,4 +131,18 @@ test('sshTerminalArgv adds a -J chain before the target', () => {
   );
   assert.deepEqual(argv.slice(argv.indexOf('-J'), argv.indexOf('-J') + 2), ['-J', 'ops@jump1:2222,ops@jump2']);
   assert.ok(argv.includes('dev@target'));
+});
+
+test('expandProxyCommand substitutes %h/%p/%r and leaves %% alone', () => {
+  assert.equal(expandProxyCommand('ssh -W %h:%p %r', { host: 'h', port: 2222, user: 'u' }), 'ssh -W h:2222 u');
+  assert.equal(expandProxyCommand('echo 100%%', { host: 'h', port: 22, user: 'u' }), 'echo 100%');
+});
+
+test('sshTerminalArgv passes ProxyCommand through when there is no jump chain', () => {
+  const argv = sshTerminalArgv(
+    { host: 'target', port: 22, user: 'dev', auth: { type: 'key' }, proxyCommand: 'ssh -W %h:%p bastion' },
+    '/srv/app',
+  );
+  assert.deepEqual(argv.slice(argv.indexOf('-o'), argv.indexOf('-o') + 2), ['-o', 'ProxyCommand=ssh -W %h:%p bastion']);
+  assert.equal(argv.includes('-J'), false);
 });

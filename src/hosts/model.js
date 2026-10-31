@@ -176,6 +176,12 @@ export function mergeHostPatch(current, patch, id) {
   } else if (cur.proxyJump) {
     next.proxyJump = cur.proxyJump;
   }
+  if (p.proxyCommand !== undefined) {
+    const command = String(p.proxyCommand).trim();
+    if (command) next.proxyCommand = command;
+  } else if (cur.proxyCommand) {
+    next.proxyCommand = cur.proxyCommand;
+  }
   return next;
 }
 

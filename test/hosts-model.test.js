@@ -211,4 +211,7 @@ test('proxyJump: merge keeps it and validation rejects self-reference', () => {
   assert.equal('proxyJump' in cleared, false);
   assert.equal(validateHostConfig({ id: 'h1', name: 'a', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'h1' }).ok, false);
   assert.equal(validateHostConfig({ id: 'h1', name: 'a', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'h2' }).ok, true);
+  const withCommand = mergeHostPatch({ id: 'h1', name: 'a', host: 'h', port: 22, user: 'u', auth: { type: 'key' } }, { proxyCommand: 'nc %h %p' }, 'h1');
+  assert.equal(withCommand.proxyCommand, 'nc %h %p');
+  assert.equal(mergeHostPatch(withCommand, { name: 'b' }, 'h1').proxyCommand, 'nc %h %p');
 });
