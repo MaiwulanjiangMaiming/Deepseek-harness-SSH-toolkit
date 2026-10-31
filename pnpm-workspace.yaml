@@ -1,0 +1,6 @@
+packages:
+  - .
+
+allowBuilds:
+  ssh2: false
+  cpu-features: false

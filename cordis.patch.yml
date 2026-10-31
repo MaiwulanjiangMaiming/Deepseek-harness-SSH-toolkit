@@ -1,0 +1,7 @@
+# dsh-ssh-toolkit bundle patch: inserts its own host plugin row so
+# `dsh plugin --profile <name> add <path>` activates it as a profile layer.
+- insert:
+    - id: 'dsh-ssh-toolkit'
+      name: 'dsh-ssh-toolkit'
+      config:
+        maxConnections: 4
