@@ -90,6 +90,28 @@ function argv0() {
   return ['ssh'];
 }
 
+/** Pick a free file name in a remote directory (`report.pdf` → `report (1).pdf`). */
+export function uniqueUploadName(name, taken) {
+  const safe = posix.basename(String(name || 'upload').replace(/\\/g, '/')).replace(/\u0000/g, '').trim() || 'upload';
+  const ext = posix.extname(safe);
+  const stem = ext === '' ? safe : safe.slice(0, -ext.length);
+  let candidate = safe;
+  for (let i = 1; i < 1000 && taken.has(candidate); i += 1) candidate = stem + ' (' + i + ')' + ext;
+  return candidate;
+}
+
+/** Write uploaded bytes into the remote workspace and return the final remote path. */
+export async function writeRemoteUpload(pool, hostId, dir, name, data) {
+  return withConn(pool, hostId, async (conn) => {
+    const fs = await conn.fs();
+    const existing = new Set((await fs.listDir(dir)).map((entry) => entry.name));
+    const finalName = uniqueUploadName(name, existing);
+    const target = posix.join(dir, finalName);
+    await fs.writeFileAtomic(target, data);
+    return target;
+  });
+}
+
 /**
  * Install the UI bridge on a host context.
  * @param ctx - plugin context carrying workspaceFiles / subprocess / sshPool.
@@ -100,6 +122,12 @@ export function installUiBridge(ctx) {
   });
   ctx.inject(['subprocess', 'sshPool'], (scope) => {
     installTerminal(scope.subprocess, scope.sshPool);
+  });
+  ctx.inject(['fileUploads', 'agents', 'sshPool'], (scope) => {
+    installUploads(scope.fileUploads, scope.agents, scope.sshPool);
+  });
+  ctx.inject(['terminalController', 'sshPool'], (scope) => {
+    installTerminalLabels(scope.terminalController, scope.sshPool);
   });
 }
 
@@ -266,4 +294,55 @@ function installTerminal(subprocess, pool) {
   };
   Object.defineProperty(subprocess, '__dshSshToolkitBridge', { value: true, enumerable: false });
   return subprocess;
+}
+
+
+function installUploads(service, agents, pool) {
+  if (!service || typeof service.uploadStream !== 'function' || service.__dshSshToolkitUpload) return service;
+  const original = service.uploadStream.bind(service);
+  service.uploadStream = async (request) => {
+    const agent = agents.get(request.sessionId);
+    const target = remoteTarget(agent?.session?.header?.cwd, agent?.session?.header?.cwd);
+    if (target === null) return original(request);
+    const chunks = [];
+    let total = 0;
+    for await (const chunk of request.data) {
+      const bytes = Buffer.from(chunk);
+      total += bytes.length;
+      if (total > 256 * 1024 * 1024) throw new Error('upload exceeds the 256 MiB remote-write limit');
+      chunks.push(bytes);
+    }
+    const data = Buffer.concat(chunks);
+    await writeRemoteUpload(pool, target.hostId, target.remotePath, request.name, data);
+    // Keep the normal attachment receipt (the message card and the model request
+    // still work) while the bytes also land in the remote workspace.
+    return original({ ...request, data: (async function* () { yield data; })() });
+  };
+  Object.defineProperty(service, '__dshSshToolkitUpload', { value: true, enumerable: false });
+  return service;
+}
+
+function installTerminalLabels(controller, pool) {
+  if (!controller || controller.__dshSshToolkitLabels) return controller;
+  const originalSpawn = controller.spawn.bind(controller);
+  controller.spawn = async (agent, owner, request, signal) => {
+    const terminal = await originalSpawn(agent, owner, request, signal);
+    const target = remoteTarget(agent?.session?.header?.cwd, agent?.session?.header?.cwd);
+    if (target !== null && terminal && terminal.info) {
+      const host = pool.getHost(target.hostId);
+      if (host) terminal.info.title = host.name || host.host;
+      terminal.info.cwd = target.remotePath;
+    }
+    return terminal;
+  };
+  const originalEnvironment = typeof controller.environment === 'function' ? controller.environment.bind(controller) : null;
+  if (originalEnvironment !== null) {
+    controller.environment = (agent, signal) => {
+      const environment = originalEnvironment(agent, signal);
+      const target = remoteTarget(agent?.session?.header?.cwd, agent?.session?.header?.cwd);
+      return target === null ? environment : { ...environment, cwd: target.remotePath };
+    };
+  }
+  Object.defineProperty(controller, '__dshSshToolkitLabels', { value: true, enumerable: false });
+  return controller;
 }

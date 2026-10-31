@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote } from '../src/compat/ui-bridge.js';
+import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote, uniqueUploadName } from '../src/compat/ui-bridge.js';
 import { mapRemoteToLocal, encodeRemotePath } from '../src/workspace/router.js';
 
 const ROOT = path.join(os.tmpdir(), 'dsh-ui-bridge-root');
@@ -70,4 +70,12 @@ test('sshTerminalArgv carries port, key and the remote cwd command', () => {
 
 test('shellQuote escapes single quotes', () => {
   assert.equal(shellQuote("a'b"), "'a'\\''b'");
+});
+
+test('uniqueUploadName keeps names safe and avoids collisions', () => {
+  assert.equal(uniqueUploadName('report.pdf', new Set()), 'report.pdf');
+  assert.equal(uniqueUploadName('report.pdf', new Set(['report.pdf'])), 'report (1).pdf');
+  assert.equal(uniqueUploadName('report.pdf', new Set(['report.pdf', 'report (1).pdf'])), 'report (2).pdf');
+  assert.equal(uniqueUploadName('../../etc/passwd', new Set()), 'passwd');
+  assert.equal(uniqueUploadName('', new Set()), 'upload');
 });

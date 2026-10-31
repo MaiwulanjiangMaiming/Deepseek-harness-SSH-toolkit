@@ -32,6 +32,7 @@ An independent, DSH 0.2-native continuation of
 | **Config import** | Scans `~/.ssh/config` (+ `config.d`, `Include`) and imports in bulk; entries without a `User` are flagged instead of silently broken. |
 | **Seven routed tools** | `bash`, `read`, `write`, `edit`, `read_image`, `glob`, `grep` — same schemas, executed over SSH. |
 | **Remote workspaces** | Browse a remote directory, pick it, get a local placeholder workspace; deleting the workspace cleans the placeholder up. |
+| **Uploads** | Attaching a file in a remote workspace writes the bytes into the remote directory (collision-safe names) while keeping the message attachment card. |
 | **UI parity** | The Files sidebar lists/previews the remote tree over SFTP, and the Terminal panel opens a remote shell (`ssh -tt`), reusing the official terminal for resize/scrollback. |
 | **Background jobs** | `run_in_background` plus `job_list` / `job_output` / `job_kill` run on the remote host. |
 | **Sandbox parity** | The three sandbox modes fence remote tool calls the same way they fence local ones. |
@@ -112,6 +113,7 @@ settings namespace is exposed to the wire.
 - Remote `grep` uses GNU grep, so ignore rules differ slightly from `rg`.
 - Windows remotes are not supported.
 - The Files header still shows the local placeholder path (reads/writes go to the remote path); the terminal uses the local `ssh` client.
+- Uploads write into the remote workspace; the attachment card still references the local staged copy for the model.
 
 ## Development
 
