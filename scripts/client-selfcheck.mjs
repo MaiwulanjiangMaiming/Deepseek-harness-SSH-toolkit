@@ -41,7 +41,7 @@ assert.ok(loaded, 'window.__ModuleLoader__.load was not called');
 assert.equal(loaded.id, 'dsh-ssh-toolkit');
 const mod = loaded.factory(requireStub);
 assert.equal(typeof mod.apply, 'function', 'factory must export apply');
-assert.deepEqual([...mod.inject], ['slots', 'workspaces', 'locale', 'remote']);
+assert.deepEqual([...mod.inject], ['slots', 'uiWorkspace', 'locale', 'remote']);
 assert.deepEqual([...required], ['react', 'zod', '@deepseek-ai/dsh-client-ui-primitives']);
 
 // The inline Typert client descriptors must mirror lib/typert-contribution.js
@@ -69,8 +69,15 @@ assert.equal(priorityUses.length, 3, 'directoryFlow x2 + bash tool.call.toolview
 assert.ok(code.includes('function DirectoryFlowCombined'), 'client.js must define the DirectoryFlowCombined occupant');
 assert.ok(code.includes('function LocalFlowBody'), 'client.js must define the local-tab browser body');
 assert.ok(code.includes('function RemoteFlowBody'), 'client.js must define the remote-tab flow body');
-assert.ok(code.includes('ctx.workspaces.listDirectory'), 'client.js must inject workspaces.listDirectory for the local tab');
-assert.ok(code.includes('ctx.workspaces.createDirectory'), 'client.js must inject workspaces.createDirectory for the local tab');
+assert.ok(code.includes('ctx.uiWorkspace.listDirectory'), 'client.js must inject uiWorkspace.listDirectory for the local tab');
+assert.ok(code.includes('ctx.uiWorkspace.createDirectory'), 'client.js must inject uiWorkspace.createDirectory for the local tab');
+// Regression guard: 0.2.1-rc.5's `workspaces` service is the WorkspaceController
+// (list/archive/pin only). Directory browse lives on `uiWorkspace`; calling the
+// old seam at runtime throws "ctx.workspaces.listDirectory is not a function".
+assert.ok(
+  !/ctx\.workspaces\.(listDirectory|createDirectory|pickDirectory)/.test(code),
+  'client.js must not call directory browse on ctx.workspaces (0.2.1-rc.5 moved it to ctx.uiWorkspace)',
+);
 assert.ok(code.includes('ctx.slots.inject("conversation.hero.workspace.directoryFlow"'), 'nested slots.inject pattern expected for hero hole');
 assert.ok(code.includes('ctx.slots.inject("sidebar.workspaces.directoryFlow"'), 'nested slots.inject pattern expected for sidebar hole');
 assert.ok(code.includes('ctx.locale.register("workspace.ssh"'), 'workspace.ssh locale must be registered');

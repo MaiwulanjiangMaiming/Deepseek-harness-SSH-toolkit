@@ -4,3 +4,5 @@ node_modules/
 .DS_Store?
 *.log
 coverage/
+# Session artifacts written by the harness when a session runs in this directory
+dsh-session-session-*/

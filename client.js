@@ -480,7 +480,7 @@ window.__ModuleLoader__.load({
     // "native", listDirectory/createDirectory return directory-picker-unavailable which
     // the client wraps as DirectoryBrowseError (the rpcError carries the business code;
     // dsh-host-apiproxy/lib/index.js:3174-3204). On hit the local tab falls back to the
-    // official native system dialog (ctx.workspaces.pickDirectory). Keep in sync with the
+    // official native system dialog (ctx.uiWorkspace.pickDirectory). Keep in sync with the
     // canonical copy in lib/typert-contribution.js.
     function isBrowseCapabilityError(err) {
       if (!err || typeof err !== 'object') return false;
@@ -1582,8 +1582,8 @@ window.__ModuleLoader__.load({
     // priority; lowest renders — dsh-client-ui-slots/lib/index.js:68-73,122).
     // One dialog, two tabs:
     //   local    — simplified local directory browser over the official wire
-    //              face ctx.workspaces.listDirectory/createDirectory
-    //              (dsh-client-runtime/lib/client.js:9956-9988). Entries are the
+    //              face ctx.uiWorkspace.listDirectory/createDirectory
+    //              (dsh-client-ui-workspace/lib/client.js:1560-1573). Entries are the
     //              host-side DIRECTORY children, name-sorted, so no client-side
     //              sort; showHidden is deliberately omitted (simplification).
     //   remote   — the remote directory-flow logic (pick host → browse →
@@ -1636,7 +1636,7 @@ window.__ModuleLoader__.load({
       var setDraft = draftState[1];
       var scanRef = React.useRef(null);
       // Native fallback: when the host has no browse capability, the local tab
-      // switches to the system dialog (ctx.workspaces.pickDirectory). nativeModeRef
+      // switches to the system dialog (ctx.uiWorkspace.pickDirectory). nativeModeRef
       // is owned by the parent and remembered across tab switches / remounts so
       // that listDirectory is not retried repeatedly.
       var nativeModeState = React.useState(false);
@@ -2863,7 +2863,7 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- registration ----------
-    var inject = ["slots", "workspaces", "locale", "remote"];
+    var inject = ["slots", "uiWorkspace", "locale", "remote"];
 
     function apply(ctx) {
       ctx.effect(function () {
@@ -2991,8 +2991,11 @@ window.__ModuleLoader__.load({
       // dsh-client-ui-directory-picker-browse/lib/client.js:1026-1035).
       // remoteCall guards a not-yet-mounted ctx.remote.ssh (the $mount above is
       // async) by rejecting instead of throwing synchronously. The local tab's
-      // listDirectory/createDirectory ride the official client cable service
-      // ctx.workspaces (dsh-client-runtime/lib/client.js:9956-9988).
+      // listDirectory/createDirectory ride the official ui-workspace client
+      // service ctx.uiWorkspace (UiWorkspaceService, dsh-client-ui-workspace/lib/
+      // client.js:1560-1573), the same seams the stock browse picker uses
+      // (dsh-client-ui-directory-picker-browse/lib/client.js:1023-1031).
+      // Older builds exposed these on ctx.workspaces; 0.2.1-rc.5 does not.
       var remoteCall = function (name) {
         return function () {
           var args = Array.prototype.slice.call(arguments);
@@ -3010,12 +3013,13 @@ window.__ModuleLoader__.load({
           resolveRemoteHome: remoteCall('resolveRemoteHome'),
           createPlaceholder: remoteCall('createPlaceholder'),
           trustHostKey: remoteCall('trustHostKey'),
-          listDirectory: function (path, signal) { return ctx.workspaces.listDirectory(path, signal); },
-          createDirectory: function (path, name) { return ctx.workspaces.createDirectory(path, name); },
+          listDirectory: function (path, signal) { return ctx.uiWorkspace.listDirectory(path, signal); },
+          createDirectory: function (path, name) { return ctx.uiWorkspace.createDirectory(path, name); },
           // Native fallback: when the host has no browse capability, pop the system
-          // dialog via the official native picker (dsh-client-runtime/lib/client.js:
-          // 9954-9958, the same path the official native picker uses).
-          pickDirectory: function () { return ctx.workspaces.pickDirectory(); },
+          // dialog via the official native picker (ctx.uiWorkspace.pickDirectory, the
+          // same path the official native picker uses,
+          // dsh-client-ui-directory-picker-native/lib/client.js:64).
+          pickDirectory: function () { return ctx.uiWorkspace.pickDirectory(); },
           t: ctx.locale.bind("workspace.ssh"),
         };
       };
