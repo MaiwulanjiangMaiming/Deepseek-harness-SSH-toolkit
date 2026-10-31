@@ -135,6 +135,11 @@ test/                 307 个单元测试（node:test）
 **其它机器/CI 上能用吗？**
 CI 只跑单测与打包。运行需要 DSH 0.2.1-rc.5 + Node 22；远端仅需 `sshd`，不需要安装任何 agent。
 
+## 路线图
+
+优先级清单见 [TODO.md](./TODO.md)：Windows 远端、流式上传/下载、口令托管、
+多跳终端凭据、Docker sshd 的 E2E、发布自动化等。
+
 ## 开发
 
 ```bash

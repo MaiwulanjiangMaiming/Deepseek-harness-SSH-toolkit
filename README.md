@@ -142,6 +142,12 @@ full read); image/PDF previews are bounded full reads.
 Into the remote workspace root, with collision-safe names (`report (1).pdf`). A local staged copy is
 kept for the model's attachment card. Uploads are buffered in memory and capped at 256 MiB.
 
+## Roadmap
+
+See [TODO.md](./TODO.md) for the prioritized backlog: Windows remote support,
+streaming uploads/downloads, credential storage, multi-hop terminal credentials,
+E2E with a Docker sshd, and release automation.
+
 ## Development
 
 ```bash

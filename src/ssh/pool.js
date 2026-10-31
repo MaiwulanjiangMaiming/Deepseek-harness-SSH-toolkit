@@ -767,6 +767,28 @@ export class SshPool {
     this.getHost = typeof options.getHost === 'function' ? options.getHost : () => undefined;
   }
 
+  /** Build the transport factory for one host: ProxyCommand process, jump tunnel, or direct. */
+  async _sock(cfg, seen) {
+    if (cfg.proxyCommand) {
+      // Same trust model as OpenSSH: the command comes from the user's own host
+      // configuration and runs through /bin/sh on this machine.
+      return async () => spawnProxyCommand(cfg);
+    }
+    if (!cfg.proxyJump) return undefined;
+    const jumpCfg = this.getHost(cfg.proxyJump);
+    if (!jumpCfg) throw new SshError({ hostId: cfg.id ?? '', stage: 'proxy-jump', message: 'ProxyJump host "' + cfg.proxyJump + '" is not configured' });
+    const jumpConn = await this._acquire(jumpCfg, seen);
+    return async () => {
+      await jumpConn.connect(); // reconnect the jump if it dropped
+      return new Promise((resolve, reject) => {
+        jumpConn.client.forwardOut('127.0.0.1', 0, cfg.host, cfg.port ?? 22, (err, stream) => {
+          if (err) reject(new SshError({ hostId: cfg.id ?? '', stage: 'proxy-jump', message: 'tunnel through "' + cfg.proxyJump + '" failed: ' + err.message, cause: err }));
+          else resolve(stream);
+        });
+      });
+    };
+  }
+
   async acquire(cfg) {
     return this._acquire(cfg, new Set());
   }
@@ -795,25 +817,7 @@ export class SshPool {
       // disposed pool never hands out a new connection.
       if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
     }
-    let sock;
-    if (cfg.proxyCommand) {
-      // Same trust model as OpenSSH: the command comes from the user's own host
-      // configuration and runs through /bin/sh on this machine.
-      sock = async () => spawnProxyCommand(cfg);
-    } else if (cfg.proxyJump) {
-      const jumpCfg = this.getHost(cfg.proxyJump);
-      if (!jumpCfg) throw new SshError({ hostId: id, stage: 'proxy-jump', message: 'ProxyJump host "' + cfg.proxyJump + '" is not configured' });
-      const jumpConn = await this._acquire(jumpCfg, seen);
-      sock = async () => {
-        await jumpConn.connect(); // reconnect the jump if it dropped
-        return new Promise((resolve, reject) => {
-          jumpConn.client.forwardOut('127.0.0.1', 0, cfg.host, cfg.port ?? 22, (err, stream) => {
-            if (err) reject(new SshError({ hostId: id, stage: 'proxy-jump', message: 'tunnel through "' + cfg.proxyJump + '" failed: ' + err.message, cause: err }));
-            else resolve(stream);
-          });
-        });
-      };
-    }
+    const sock = await this._sock(cfg, seen);
     const conn = new SshConn(cfg, { sock });
     this.conns.set(id, conn);
     try {
@@ -838,7 +842,10 @@ export class SshPool {
   }
 
   async testConnection(cfg) {
-    const conn = new SshConn({ ...cfg, connectTimeoutMs: cfg.connectTimeoutMs ?? 6_000 });
+    const resolved = { ...cfg, connectTimeoutMs: cfg.connectTimeoutMs ?? 6_000 };
+    const seen = new Set([resolved.id]);
+    const sock = await this._sock(resolved, seen);
+    const conn = new SshConn(resolved, { sock });
     try {
       await conn.connect();
       const r = await conn.exec('echo ok', { timeoutMs: 5_000 });
