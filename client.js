@@ -937,9 +937,13 @@ window.__ModuleLoader__.load({
       ".tk-toolbar{display:flex;align-items:center;gap:10px}",
       ".tk-search{position:relative;display:flex;align-items:center;flex:1 1 auto;min-width:0}",
       ".tk-search>*{width:100%;min-width:0}",
-      ".tk-search input{width:100%;height:32px;padding:0 10px 0 30px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-2,#232529);color:inherit;font:inherit;font-size:12px;box-sizing:border-box;outline:none}",
-      ".tk-search input:focus{border-color:var(--dsw-alias-brand-primary,#4c8dff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#4c8dff) 22%,transparent)}",
-      ".tk-search-icon{position:absolute;left:9px;display:flex;color:var(--dsw-alias-label-tertiary,#9a9a9a);pointer-events:none}",
+      // The primitives Input already draws its wrapper (border/background/radius);
+      // styling the inner <input> as well produced a double border.
+      ".tk-search > span:not(.tk-search-icon){flex:1;min-width:0;display:flex;align-items:center}",
+      ".tk-search:focus-within > span:not(.tk-search-icon){border-color:var(--dsw-alias-brand-primary,#4c8dff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#4c8dff) 22%,transparent)}",
+      ".tk-search input{width:100%;height:100%;padding:0 4px 0 22px;border:none;border-radius:0;background:transparent;box-shadow:none;color:inherit;font:inherit;font-size:12px;box-sizing:border-box;outline:none}",
+      
+      ".tk-search-icon{position:absolute;left:9px;display:flex;width:auto;color:var(--dsw-alias-label-tertiary,#9a9a9a);pointer-events:none}",
       ".tk-count{flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-variant-numeric:tabular-nums}",
       // host cards
       ".tk-list{display:flex;flex-direction:column;gap:8px}",
