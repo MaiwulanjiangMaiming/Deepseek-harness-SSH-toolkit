@@ -1,5 +1,7 @@
 # DeepSeek Harness SSH Toolkit
 
+[中文](./README.zh.md) · [English](./README.md)
+
 通过 SSH 把 DeepSeek Harness 的工作区放到任意远端机器：在远端选一个目录作为工作区，
 之后所有 shell / 文件 / 搜索工具调用都在那台机器上执行。
 
@@ -88,7 +90,7 @@ src/workspace/        router.js（占位路径）、placeholder.js
 src/jobs.js           远端后台任务
 src/policy.js         sandbox 围栏
 src/compat/           UI 桥接：右栏 Files / 终端
-test/                 295 个单元测试（node:test）
+test/                 307 个单元测试（node:test）
 ```
 
 主机以记录形式存于 `dsh_ssh_hosts` storage domain
@@ -104,6 +106,32 @@ test/                 295 个单元测试（node:test）
 - 不支持 Windows 远端。
 - 文件面板顶部的路径仍显示本地占位目录（远端路径已用于实际读写）；终端依赖本机 `ssh` 客户端。
 - 上传会写入远端工作区；消息附件卡片仍然引用本地暂存副本供模型使用。
+
+## 常见问题
+
+**测试连接失败 / 连不上主机**
+检查 host、port、user；确认远端 `sshd` 在跑、22 端口可达。密钥认证要求私钥权限 `600`，
+路径不要带空格或中文。桌面版从 Finder 启动时可能没有 `SSH_AUTH_SOCK`，插件会回退到
+`~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa`；都没有时请在主机配置里显式填私钥路径。
+
+**Files 侧栏一直显示 Reading…**
+确认插件已随 profile 加载（重启 DSH）、远端目录存在且当前用户可读。侧栏每 3 秒轮询一次
+元数据，网络很慢时首次加载会稍久。
+
+**终端里提示输入密码或确认主机指纹**
+终端就是本机的 `ssh -tt`，按 OpenSSH 的正常流程走；密钥/agent 认证不会弹密码。
+主机指纹的 `known_hosts` 与插件设置页的 TOFU 对话框是两套（终端用系统默认）。
+
+**打开大文件会不会整份下载？**
+不会。文本预览走远端 `awk` 只取当前页（失败时回退到受 32MB 上限约束的整读）；
+图片/PDF 预览仍是受上限的整读。
+
+**上传的文件在哪？**
+写进远端工作区根目录，重名自动变成 `report (1).pdf`；消息附件卡片同时保留一份本地暂存
+副本给模型使用。单次上传上限 256 MiB（当前在内存中缓冲）。
+
+**其它机器/CI 上能用吗？**
+CI 只跑单测与打包。运行需要 DSH 0.2.1-rc.5 + Node 22；远端仅需 `sshd`，不需要安装任何 agent。
 
 ## 开发
 

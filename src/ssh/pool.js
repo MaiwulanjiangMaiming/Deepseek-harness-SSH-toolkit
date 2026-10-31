@@ -4,7 +4,7 @@
 //   SshConn (exec / execStream / sftp), SshPool (acquire/release/invalidate/testConnection/dispose).
 import { Client } from 'ssh2';
 import { createHmac, createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ExecFs } from './exec-fs.js'; // exec+base64 fallback used when SFTP is disabled
@@ -275,8 +275,13 @@ export class SshConn {
 
   async _loadPrivateKey() {
     const auth = this.cfg.auth;
-    if (!auth || auth.type !== 'key' || !auth.privateKeyPath) return undefined;
-    return readFile(expandHome(auth.privateKeyPath));
+    if (auth && auth.type === 'key' && auth.privateKeyPath) return readFile(expandHome(auth.privateKeyPath));
+    // No explicit identity: prefer the agent, but fall back to the standard
+    // ~/.ssh identities. The desktop app is launched by launchd and often has no
+    // SSH_AUTH_SOCK, which would otherwise leave key-auth hosts unusable.
+    if (process.env.SSH_AUTH_SOCK) return undefined;
+    const fallback = await defaultIdentity();
+    return fallback === undefined ? undefined : readFile(fallback);
   }
 
   async _readKnownHosts() {
@@ -715,6 +720,20 @@ export class SftpWrapper {
 }
 
 // ---------- SshPool ----------
+/** First conventional private key under ~/.ssh, in OpenSSH preference order. */
+export async function defaultIdentity(home = os.homedir()) {
+  for (const name of ['id_ed25519', 'id_ecdsa', 'id_rsa']) {
+    const candidate = path.join(home, '.ssh', name);
+    try {
+      const info = await stat(candidate);
+      if (info.isFile()) return candidate;
+    } catch {
+      // try the next conventional name
+    }
+  }
+  return undefined;
+}
+
 export class SshPool {
   constructor(options = {}) {
     this.maxConnections = options.maxConnections ?? 4;

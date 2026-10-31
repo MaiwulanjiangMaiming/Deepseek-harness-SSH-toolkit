@@ -112,6 +112,27 @@ export async function writeRemoteUpload(pool, hostId, dir, name, data) {
   });
 }
 
+/** Read one line window remotely without downloading the whole file (awk + stderr total). */
+export async function remoteTextWindow(conn, remotePath, offset, limit, maxBytes) {
+  const last = offset + limit - 1;
+  const cmd = "LC_ALL=C awk -v s=" + offset + " -v e=" + last
+    + " 'NR>=s && NR<=e {print} END {print NR > \"/dev/stderr\"}' " + shellQuote(remotePath);
+  let out;
+  try {
+    out = await conn.exec(cmd, { timeoutMs: 20000, maxStdoutBytes: Math.max(maxBytes + 65536, 131072) });
+  } catch {
+    return null; // awk missing / output overflow: caller falls back to a bounded full read
+  }
+  if (out.code !== 0) return null;
+  const total = Number.parseInt(String(out.stderr || '').trim(), 10);
+  if (!Number.isInteger(total) || total < 0) return null;
+  let text = String(out.stdout || '');
+  if (text.endsWith('\n')) text = text.slice(0, -1);
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) throw new Error('workspace-file/too-large: page exceeds the ' + maxBytes + ' byte cap');
+  if (text.includes('\u0000')) throw new Error('workspace-file/not-text: contains NUL bytes');
+  return { text, lines: text === '' ? 0 : text.split('\n').length, eof: last >= total };
+}
+
 /**
  * Install the UI bridge on a host context.
  * @param ctx - plugin context carrying workspaceFiles / subprocess / sshPool.
@@ -165,7 +186,9 @@ function installWorkspaceFiles(service, pool, scope) {
       const fs = await conn.fs();
       return fs.listDir(target.remotePath);
     });
-    const capped = entries.slice(0, service.config?.maxEntries ?? 2000);
+    // Match the local backend's ordering so the tree is stable across backends.
+    const sorted = [...entries].sort((left, right) => left.name.localeCompare(right.name));
+    const capped = sorted.slice(0, config.maxEntries);
     return {
       path: target.relativePath,
       entries: capped.map((entry) => ({
@@ -173,7 +196,7 @@ function installWorkspaceFiles(service, pool, scope) {
         type: entryType(entry.type),
         ...entry.size === undefined ? {} : { size: entry.size },
       })),
-      truncated: entries.length > capped.length,
+      truncated: sorted.length > capped.length,
     };
   };
 
@@ -192,20 +215,24 @@ function installWorkspaceFiles(service, pool, scope) {
     signal?.throwIfAborted?.();
     const offset = range?.offset ?? 1;
     const limit = range?.limit ?? config.maxLines;
-    const { info, text } = await withConn(pool, target.hostId, async (conn) => {
+    const page = await withConn(pool, target.hostId, async (conn) => {
       const fs = await conn.fs();
-      const st = await fs.stat(target.remotePath);
-      if (st === undefined) throw new Error('workspace-file/not-found: "' + p + '"');
-      if (st.size !== undefined && st.size > config.maxFileBytes) throw new Error('workspace-file/too-large: "' + p + '"');
-      if (st.type !== 'file') throw new Error('workspace-file/not-file: "' + p + '"');
-      return { info: st, text: await fs.readText(target.remotePath) };
+      const info = await fs.stat(target.remotePath);
+      if (info === undefined) throw new Error('workspace-file/not-found: "' + p + '"');
+      if (info.type !== 'file') throw new Error('workspace-file/not-file: "' + p + '"');
+      // A remote awk window avoids downloading a multi-hundred-MB log just to
+      // show its first page; fall back to a bounded full read when awk fails.
+      const window = await remoteTextWindow(conn, target.remotePath, offset, limit, config.maxBytes);
+      if (window !== null) return { info, ...window };
+      if (info.size !== undefined && info.size > config.maxFileBytes) throw new Error('workspace-file/too-large: "' + p + '"');
+      const text = await fs.readText(target.remotePath);
+      if (text.includes('\u0000')) throw new Error('workspace-file/not-text: "' + p + '" contains NUL bytes');
+      return { info, ...pageOf(text, offset, limit, config.maxBytes) };
     });
-    if (text.includes('\u0000')) throw new Error('workspace-file/not-text: "' + p + '" contains NUL bytes');
-    const page = pageOf(text, offset, limit, config.maxBytes);
     return {
       absolutePath: target.localPath,
-      version: versionOf(info),
-      ...info.size === undefined ? {} : { bytes: info.size },
+      version: versionOf(page.info),
+      ...page.info.size === undefined ? {} : { bytes: page.info.size },
       offset,
       text: page.text,
       lines: page.lines,
@@ -284,7 +311,9 @@ function installTerminal(subprocess, pool) {
     const target = remoteTarget(spec?.cwd, spec?.cwd);
     if (target === null) return original(spec);
     const host = pool.getHost(target.hostId);
-    if (!host) return original(spec);
+    // A placeholder workspace whose host was deleted must not silently open a
+    // local shell in an empty directory.
+    if (!host) throw new Error('SSH host "' + target.hostId + '" is not configured; add it in Settings → SSH Connections');
     return original({
       ...spec,
       argv: sshTerminalArgv(host, target.remotePath),

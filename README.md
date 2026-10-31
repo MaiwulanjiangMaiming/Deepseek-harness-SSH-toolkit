@@ -1,5 +1,7 @@
 # DeepSeek Harness SSH Toolkit
 
+[English](./README.md) · [中文](./README.zh.md)
+
 Run DeepSeek Harness sessions on a remote machine over SSH. Pick any folder on
 that machine as a workspace, and every shell / file / search tool call executes
 there instead of on your laptop.
@@ -95,7 +97,7 @@ src/workspace/        router.js (placeholder paths), placeholder.js
 src/jobs.js           remote background jobs
 src/policy.js         sandbox fence
 src/compat/           UI bridge: remote Files sidebar + terminal
-test/                 295 unit tests (node:test)
+test/                 307 unit tests (node:test)
 ```
 
 Hosts are stored as records in the `dsh_ssh_hosts` storage domain
@@ -114,6 +116,30 @@ settings namespace is exposed to the wire.
 - Windows remotes are not supported.
 - The Files header still shows the local placeholder path (reads/writes go to the remote path); the terminal uses the local `ssh` client.
 - Uploads write into the remote workspace; the attachment card still references the local staged copy for the model.
+
+## Troubleshooting
+
+**Connection test fails**
+Check host, port and user; confirm `sshd` runs and the port is reachable. Keys must be `600` and
+paths should avoid spaces. A desktop app launched from Finder may lack `SSH_AUTH_SOCK`; the plugin
+then falls back to `~/.ssh/id_ed25519` → `id_ecdsa` → `id_rsa`. Set an explicit key path if neither
+is available.
+
+**Files sidebar stays on "Reading…"**
+Confirm the plugin loaded with the profile (restart DSH), the directory exists and is readable.
+The panel polls metadata every 3s, so a slow link takes a moment on first load.
+
+**Terminal asks for a password or a host-key confirmation**
+It is a plain local `ssh -tt`; OpenSSH handles auth. Key/agent auth does not prompt. The terminal's
+`known_hosts` is the system one — separate from the plugin's TOFU dialog in Settings.
+
+**Does opening a huge file download all of it?**
+No. Text previews fetch the current page with a remote `awk` window (falling back to a 32 MB-capped
+full read); image/PDF previews are bounded full reads.
+
+**Where does an uploaded file go?**
+Into the remote workspace root, with collision-safe names (`report (1).pdf`). A local staged copy is
+kept for the model's attachment card. Uploads are buffered in memory and capped at 256 MiB.
 
 ## Development
 

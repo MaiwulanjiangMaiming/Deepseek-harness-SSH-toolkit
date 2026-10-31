@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote, uniqueUploadName } from '../src/compat/ui-bridge.js';
+import { remoteTarget, entryType, versionOf, pageOf, sshTerminalArgv, shellQuote, uniqueUploadName, remoteTextWindow } from '../src/compat/ui-bridge.js';
+import { defaultIdentity } from '../src/ssh/pool.js';
+import { promises as fsp } from 'node:fs';
 import { mapRemoteToLocal, encodeRemotePath } from '../src/workspace/router.js';
 
 const ROOT = path.join(os.tmpdir(), 'dsh-ui-bridge-root');
@@ -78,4 +80,34 @@ test('uniqueUploadName keeps names safe and avoids collisions', () => {
   assert.equal(uniqueUploadName('report.pdf', new Set(['report.pdf', 'report (1).pdf'])), 'report (2).pdf');
   assert.equal(uniqueUploadName('../../etc/passwd', new Set()), 'passwd');
   assert.equal(uniqueUploadName('', new Set()), 'upload');
+});
+
+test('remoteTextWindow parses an awk window and total count', async () => {
+  const calls = [];
+  const conn = { exec: async (cmd, opts) => { calls.push({ cmd, opts }); return { code: 0, stdout: 'b\nc\n', stderr: '4' }; } };
+  const page = await remoteTextWindow(conn, '/srv/a b.log', 2, 2, 1024);
+  assert.deepEqual(page, { text: 'b\nc', lines: 2, eof: false });
+  assert.ok(calls[0].cmd.includes("'/srv/a b.log'"));
+  assert.ok(calls[0].cmd.includes('-v s=2'));
+});
+
+test('remoteTextWindow reports eof and handles a failed command', async () => {
+  const ok = { exec: async () => ({ code: 0, stdout: 'x\n', stderr: '1' }) };
+  assert.deepEqual(await remoteTextWindow(ok, '/f', 1, 5, 1024), { text: 'x', lines: 1, eof: true });
+  const missing = { exec: async () => ({ code: 127, stdout: '', stderr: 'awk: not found' }) };
+  assert.equal(await remoteTextWindow(missing, '/f', 1, 5, 1024), null);
+});
+
+test('defaultIdentity prefers ed25519, then ecdsa, then rsa', async () => {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-identity-'));
+  try {
+    await fsp.mkdir(path.join(home, '.ssh'), { recursive: true });
+    assert.equal(await defaultIdentity(home), undefined);
+    await fsp.writeFile(path.join(home, '.ssh', 'id_rsa'), 'x');
+    assert.equal(await defaultIdentity(home), path.join(home, '.ssh', 'id_rsa'));
+    await fsp.writeFile(path.join(home, '.ssh', 'id_ed25519'), 'x');
+    assert.equal(await defaultIdentity(home), path.join(home, '.ssh', 'id_ed25519'));
+  } finally {
+    await fsp.rm(home, { recursive: true, force: true });
+  }
 });
