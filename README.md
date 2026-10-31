@@ -32,6 +32,7 @@ An independent, DSH 0.2-native continuation of
 | **Config import** | Scans `~/.ssh/config` (+ `config.d`, `Include`) and imports in bulk; entries without a `User` are flagged instead of silently broken. |
 | **Seven routed tools** | `bash`, `read`, `write`, `edit`, `read_image`, `glob`, `grep` — same schemas, executed over SSH. |
 | **Remote workspaces** | Browse a remote directory, pick it, get a local placeholder workspace; deleting the workspace cleans the placeholder up. |
+| **UI parity** | The Files sidebar lists/previews the remote tree over SFTP, and the Terminal panel opens a remote shell (`ssh -tt`), reusing the official terminal for resize/scrollback. |
 | **Background jobs** | `run_in_background` plus `job_list` / `job_output` / `job_kill` run on the remote host. |
 | **Sandbox parity** | The three sandbox modes fence remote tool calls the same way they fence local ones. |
 | **Trust on first use** | Unknown host keys show a fingerprint dialog; later connections verify `known_hosts`. |
@@ -92,6 +93,7 @@ src/remote/           Typert contract + host service (settings-page RPC)
 src/workspace/        router.js (placeholder paths), placeholder.js
 src/jobs.js           remote background jobs
 src/policy.js         sandbox fence
+src/compat/           UI bridge: remote Files sidebar + terminal
 test/                 295 unit tests (node:test)
 ```
 
@@ -109,6 +111,7 @@ settings namespace is exposed to the wire.
   imported.
 - Remote `grep` uses GNU grep, so ignore rules differ slightly from `rg`.
 - Windows remotes are not supported.
+- The Files header still shows the local placeholder path (reads/writes go to the remote path); the terminal uses the local `ssh` client.
 
 ## Development
 

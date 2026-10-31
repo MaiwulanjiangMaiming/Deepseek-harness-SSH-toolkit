@@ -12,6 +12,7 @@ import { openHostsDomain } from './src/hosts/domain.js';
 import { registerRemote } from './src/remote/service.js';
 import { routeByCwd } from './src/workspace/router.js';
 import { registerRoutedTools, ROUTED_TOOL_NAMES } from './tools/index.js';
+import { installUiBridge } from './src/compat/ui-bridge.js';
 
 export const name = 'dsh-ssh-toolkit';
 
@@ -279,5 +280,7 @@ export function apply(ctx, config = {}) {
   });
   installPlaceholderCleanup(ctx);
   installToolRoutingHook(ctx, { getHost: (id) => svc.getHost(id) });
+  // Files sidebar + Terminal panel: serve placeholder-scoped paths over SSH.
+  installUiBridge(ctx);
   ctx.logger.info('[dsh-ssh-toolkit] loaded: sshPool service (maxConnections=' + (config.maxConnections ?? 4) + ') + storage domain dsh_ssh_hosts + remote ssh/* + placeholder cleanup + agent/created tool routing');
 }

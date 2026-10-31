@@ -26,6 +26,7 @@
 | **配置导入** | 扫描 `~/.ssh/config`（含 `config.d`、`Include`）批量导入；缺 `User` 的条目会明确禁用而不是导进来跑不通。 |
 | **七个工具远端执行** | `bash`、`read`、`write`、`edit`、`read_image`、`glob`、`grep`，schema 不变。 |
 | **远端工作区** | 浏览远端目录并选为工作区；删除工作区时自动清理本地占位目录。 |
+| **界面一致** | 右侧栏 Files 通过 SFTP 读取远端目录/文件预览，Terminal 直接开远端 shell（`ssh -tt`），断线重连、resize、滚动都沿用官方终端实现。 |
 | **后台任务远端化** | `run_in_background` 与 `job_list` / `job_output` / `job_kill` 整条链路在远端。 |
 | **Sandbox 一致** | 三种 sandbox 模式对远端调用的拦截语义与本地一致。 |
 | **首次信任（TOFU）** | 首次连接弹出指纹确认，之后按 `known_hosts` 校验。 |
@@ -85,6 +86,7 @@ src/remote/           Typert 契约 + host 服务（设置页 RPC）
 src/workspace/        router.js（占位路径）、placeholder.js
 src/jobs.js           远端后台任务
 src/policy.js         sandbox 围栏
+src/compat/           UI 桥接：右栏 Files / 终端
 test/                 295 个单元测试（node:test）
 ```
 
@@ -99,6 +101,7 @@ test/                 295 个单元测试（node:test）
 - 不支持 `ProxyJump` / 多跳；这类条目会列出但不会导入。
 - 远端 `grep` 基于 GNU grep，忽略规则与 `rg` 略有差异。
 - 不支持 Windows 远端。
+- 文件面板顶部的路径仍显示本地占位目录（远端路径已用于实际读写）；终端依赖本机 `ssh` 客户端。
 
 ## 开发
 
