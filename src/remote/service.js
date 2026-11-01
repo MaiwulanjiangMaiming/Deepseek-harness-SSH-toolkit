@@ -14,7 +14,7 @@
 import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { SshError, HOST_KEY_UNKNOWN_STAGE, sshKeyFingerprint, sshKeyTypeFromBlob, appendKnownHost, defaultKnownHostsPath } from '../ssh/pool.js';
-import { createPlaceholderDir, hostDisplayName, placeholderWorkspaceTitle } from '../workspace/placeholder.js';
+import { createPlaceholderDir, hostDisplayName, placeholderDisplayName, placeholderWorkspaceTitle } from '../workspace/placeholder.js';
 import { encodeRemotePath, mapLocalToRemote } from '../workspace/router.js';
 import { HOST_TYPERT_CONTRIBUTION, REMOTE_SERVICE, assertContributionShape } from './contract.js';
 import { mergeTestConfig, mergeHostPatch, validateHostConfig, formatHostErrors, redactHosts, hostsSecretsList } from '../hosts/model.js';
@@ -57,6 +57,23 @@ async function acquireStoredOrHostKeyUnknown(acquireFn, id) {
   }
 }
 
+/**
+ * True when a stored title is one of the shapes this plugin auto-generated for a
+ * placeholder workspace and can therefore be safely rewritten: the base64
+ * segment, "basename · host" (older), or "host / basename" (previous). A title a
+ * user typed themselves matches none of these and is preserved.
+ * @param title current stored title.
+ * @param remotePath absolute remote path of the placeholder.
+ * @param hostName host display name (or host id) for the host-prefixed shapes.
+ */
+function isLegacyPlaceholderTitle(title, remotePath, hostName) {
+  if (typeof title !== 'string' || title.length === 0) return false;
+  const base = remotePath.split('/').filter(Boolean).pop() || 'root';
+  return title === encodeRemotePath(remotePath)
+    || title === hostName + ' / ' + base
+    || title === base + ' · ' + hostName;
+}
+
 // Reachability cache for the sidebar dots. The client polls every 20s and this
 // window is deliberately longer than one poll: an idle sidebar then dials each
 // host about once a minute instead of every tick, and a slow/offline host is
@@ -79,6 +96,7 @@ export class SshRemoteService extends Service {
     // de-duplicated so overlapping polls never open parallel connections.
     this.presenceCache = new Map(); // hostId → { at, status }
     this.presenceInflight = new Map(); // hostId → Promise<'online' | 'offline'>
+    this.titlesMigrated = false; // one legacy auto-title pass per process (first presence poll)
   }
 
   /** Inject-time hook: supply the stored-host lookup (domain access is only safe inside ctx.inject). */
@@ -357,26 +375,21 @@ export class SshRemoteService extends Service {
       const result = await createPlaceholderDir({ hostId: id, remotePath: target, env: this.env });
       const registry = this.resolveWorkspaceRegistry();
       if (registry && typeof registry.create === 'function') {
-        // Title = host display name / basename (falling back to hostId), so the sidebar
-        // can distinguish remote workspaces by host. This is the idempotent upgrade target
-        // for legacy records (bare basename, base64-encoded segment, or legacy
-        // "basename · host display name"); the placeholder folder's base64 name is not shown.
+        // Title = bare remote basename. The host is not part of the name any more:
+        // the sidebar draws it as a separate chip from ssh/workspacePresence, so
+        // "host / project" would print the host twice. This is also the idempotent
+        // upgrade target for auto-generated legacy titles (base64 segment,
+        // "basename · host", "host / basename"); a user-edited title is left alone.
         // create() returns the existing entity when the path already has a record; because
         // localPath is built by this plugin's mapRemoteToLocal (placeholder-root/<hostId>/<base64>),
         // the upgrade only touches placeholder workspace records, never ordinary local workspaces.
-        const hostName = hostDisplayName(hosts, id);
-        const title = placeholderWorkspaceTitle(target, hostName);
+        const title = placeholderWorkspaceTitle(target);
         const entity = await registry.create(result.localPath, title);
         if (entity && typeof entity.setTitle === 'function') {
           const legacy = typeof entity.title === 'string' ? entity.title : '';
-          const wantsBase = target.split('/').filter(Boolean).pop();
-          const oldDotTitle = wantsBase + ' · ' + hostName; // legacy format: basename · host display name
-          // Upgrade (idempotent, placeholder records only): rename only when the title matches
-          // an old signature — ① base64-encoded segment, ② bare basename (no host marker),
-          // ③ legacy "basename · host display name" auto-title. Anything else (user-edited, or
-          // already the new hostname/basename format) is left alone so personal names are kept.
-          const needsUpgrade = legacy === encodeRemotePath(target) || legacy === wantsBase || legacy === oldDotTitle;
-          if (needsUpgrade && legacy !== title) await entity.setTitle(title);
+          if (isLegacyPlaceholderTitle(legacy, target, hostDisplayName(hosts, id)) && legacy !== title) {
+            await entity.setTitle(title);
+          }
         }
       }
       return result;
@@ -407,6 +420,13 @@ export class SshRemoteService extends Service {
     } catch {
       return { states: [] };
     }
+    // One-time upgrade of the old auto titles (host baked into the name) to the
+    // bare basename; the chip now carries the host. Fire-and-forget: this poll
+    // still reports the old titles, the next one shows the migrated names.
+    if (!this.titlesMigrated) {
+      this.titlesMigrated = true;
+      this.migratePlaceholderTitles(entities).catch(() => {});
+    }
     const states = [];
     for (const entity of Array.isArray(entities) ? entities : []) {
       const localPath = entity && typeof entity.path === 'string' ? entity.path : '';
@@ -424,7 +444,8 @@ export class SshRemoteService extends Service {
         cfg = undefined;
       }
       if (!cfg || typeof cfg !== 'object') continue;
-      states.push({ workspaceId: String(entity.id ?? ''), hostId: mapped.hostId, remotePath: mapped.remotePath });
+      const hostName = typeof cfg.name === 'string' && cfg.name.trim().length > 0 ? cfg.name.trim() : mapped.hostId;
+      states.push({ workspaceId: String(entity.id ?? ''), hostId: mapped.hostId, hostName, remotePath: mapped.remotePath });
     }
     const hostIds = [...new Set(states.map((state) => state.hostId))];
     const probed = await Promise.all(hostIds.map((hostId) => this.probeHostPresence(hostId)));
@@ -432,6 +453,50 @@ export class SshRemoteService extends Service {
     return {
       states: states.map((state) => ({ ...state, status: statusOf.get(state.hostId) ?? 'offline' })),
     };
+  }
+
+  /**
+   * Rewrite legacy auto-generated placeholder titles to the bare basename.
+   *
+   * Older releases encoded the host into the title ("host / project" or
+   * "project · host") because the sidebar had no chip. The host is metadata now,
+   * so leaving it in the name would print it twice. Only exact auto shapes are
+   * touched (see isLegacyPlaceholderTitle); anything the user typed is kept.
+   * @param entities workspace registry entities (registry.list()).
+   * @returns number of titles rewritten.
+   */
+  async migratePlaceholderTitles(entities) {
+    if (!Array.isArray(entities)) return 0;
+    let renamed = 0;
+    for (const entity of entities) {
+      if (!entity || typeof entity.setTitle !== 'function' || typeof entity.path !== 'string') continue;
+      let mapped;
+      try {
+        mapped = mapLocalToRemote(entity.path, this.env);
+      } catch {
+        mapped = null;
+      }
+      if (!mapped) continue;
+      let cfg;
+      try {
+        cfg = this.resolveStored(mapped.hostId);
+      } catch {
+        cfg = undefined;
+      }
+      if (!cfg || typeof cfg !== 'object') continue;
+      const hostName = typeof cfg.name === 'string' && cfg.name.trim().length > 0 ? cfg.name.trim() : mapped.hostId;
+      const title = typeof entity.title === 'string' ? entity.title : '';
+      const base = placeholderDisplayName(mapped.remotePath);
+      if (title !== base && isLegacyPlaceholderTitle(title, mapped.remotePath, hostName)) {
+        try {
+          await entity.setTitle(base);
+          renamed += 1;
+        } catch {
+          // A failed rename is harmless: the row still renders (host chip + old title).
+        }
+      }
+    }
+    return renamed;
   }
 
   /**

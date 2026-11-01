@@ -100,11 +100,11 @@ test('hostDisplayName: prefers name, falls back to hostId', () => {
   assert.equal(hostDisplayName({}, ''), '?');                                     // empty hostId → '?'
 });
 
-test('placeholderWorkspaceTitle: host display name / basename', () => {
-  assert.equal(placeholderWorkspaceTitle('/home/devuser/workspace', 'devuser'), 'devuser / workspace');
-  assert.equal(placeholderWorkspaceTitle('/data/work', 'h1'), 'h1 / work');
-  assert.equal(placeholderWorkspaceTitle('/a/b/', 'sv1'), 'sv1 / b');        // trailing slash
-  assert.equal(placeholderWorkspaceTitle('/', 'sv1'), 'sv1 / root');         // root fallback
+test('placeholderWorkspaceTitle: bare remote basename (host is a sidebar chip now)', () => {
+  assert.equal(placeholderWorkspaceTitle('/home/devuser/workspace'), 'workspace');
+  assert.equal(placeholderWorkspaceTitle('/data/work'), 'work');
+  assert.equal(placeholderWorkspaceTitle('/a/b/'), 'b');        // trailing slash
+  assert.equal(placeholderWorkspaceTitle('/'), 'root');         // root fallback
 });
 
 test('createPlaceholderDir: real directory on disk (tmp isolated, DSH_HOME=/tmp/xxx; no writes to ~/.dsh/remote)', async () => {

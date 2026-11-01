@@ -314,7 +314,7 @@ test('createPlaceholder validates the host in dsh-ssh-hosts and creates a real d
   }
 });
 
-test('createPlaceholder explicit registry: workspace title = host display name / basename (fallback to hostId when name missing)', async () => {
+test('createPlaceholder explicit registry: workspace title = bare remote basename', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -333,15 +333,15 @@ test('createPlaceholder explicit registry: workspace title = host display name /
     const result = await svc.createPlaceholder('h1', '/home/devuser/workspace');
     assert.equal(creates.length, 1);
     assert.equal(creates[0].path, result.localPath);
-    // M4_HOST has no name -> display falls back to hostId 'h1': title = h1 / workspace
-    assert.equal(creates[0].title, 'h1 / workspace');
+    // The host is metadata (sidebar chip), not part of the title.
+    assert.equal(creates[0].title, 'workspace');
     ctx.dispose?.();
   } finally {
     fsMod.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('createPlaceholder auto-fixes legacy base64 title to host name / basename, preserves user-edited title', async () => {
+test('createPlaceholder auto-fixes legacy base64 title to basename, preserves user-edited title', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -358,8 +358,8 @@ test('createPlaceholder auto-fixes legacy base64 title to host name / basename, 
       }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
-    // M4_HOST has no name -> display falls back to 'h1': encoded segment upgrades to h1 / work
-    assert.deepEqual(renames, ['h1 / work']);
+    // Encoded segment upgrades to the plain basename.
+    assert.deepEqual(renames, ['work']);
     // User-edited title (non-encoded) -> untouched
     const renames2 = [];
     svc.setWorkspaceRegistry(() => ({
@@ -376,7 +376,7 @@ test('createPlaceholder auto-fixes legacy base64 title to host name / basename, 
   }
 });
 
-test('createPlaceholder title uses host name when present, no fallback to hostId', async () => {
+test('createPlaceholder title stays the basename even when the host has a display name', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -388,14 +388,14 @@ test('createPlaceholder title uses host name when present, no fallback to hostId
     svc.env = { DSH_HOME: tmp };
     svc.setWorkspaceRegistry(() => registry);
     await svc.createPlaceholder('h1', '/home/devuser/workspace');
-    assert.equal(creates[0].title, 'devuser / workspace');
+    assert.equal(creates[0].title, 'workspace');
     ctx.dispose?.();
   } finally {
     fsMod.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('createPlaceholder migrates legacy plain basename to host name / basename; idempotent', async () => {
+test('createPlaceholder migrates the old `host / basename` title to the bare basename; idempotent', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -403,17 +403,17 @@ test('createPlaceholder migrates legacy plain basename to host name / basename; 
   try {
     const { ctx, svc } = makeBrowseService(null, makeHostsTable({ h1: { ...M4_HOST, name: 'devuser' } }), {});
     svc.env = { DSH_HOME: tmp };
-    // Legacy: title equals plain basename (no host identifier) -> upgrade to host format
+    // Previous public format: "host / basename" -> upgrade to the plain basename.
     const renames = [];
     svc.setWorkspaceRegistry(() => ({
-      create: async () => ({ title: 'work', setTitle: async (t) => { renames.push(t); } }),
+      create: async () => ({ title: 'devuser / work', setTitle: async (t) => { renames.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
-    assert.deepEqual(renames, ['devuser / work']);
-    // Idempotent: already new format -> no setTitle
+    assert.deepEqual(renames, ['work']);
+    // Idempotent: a plain basename, or a title the user typed, is left alone.
     const renames2 = [];
     svc.setWorkspaceRegistry(() => ({
-      create: async () => ({ title: 'devuser / work', setTitle: async (t) => { renames2.push(t); } }),
+      create: async () => ({ title: 'work', setTitle: async (t) => { renames2.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
     assert.deepEqual(renames2, []);
@@ -444,7 +444,7 @@ test('createPlaceholder preserves user custom title containing host identifier, 
   }
 });
 
-test('createPlaceholder migrates legacy `basename · host` format to `host / basename`', async () => {
+test('createPlaceholder migrates legacy `basename · host` format to the bare basename', async () => {
   const fsMod = await import('node:fs');
   const osMod = await import('node:os');
   const pathMod = await import('node:path');
@@ -452,17 +452,17 @@ test('createPlaceholder migrates legacy `basename · host` format to `host / bas
   try {
     const { ctx, svc } = makeBrowseService(null, makeHostsTable({ h1: { ...M4_HOST, name: 'devuser' } }), {});
     svc.env = { DSH_HOME: tmp };
-    // Legacy auto title `work · devuser` (hostName=devuser) -> upgrade to new format
+    // Legacy auto title `work · devuser` (hostName=devuser) -> upgrade to the basename.
     const renames = [];
     svc.setWorkspaceRegistry(() => ({
       create: async () => ({ title: 'work · devuser', setTitle: async (t) => { renames.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
-    assert.deepEqual(renames, ['devuser / work']);
-    // Already new format -> idempotent no-op
+    assert.deepEqual(renames, ['work']);
+    // Already migrated -> idempotent no-op
     const renames2 = [];
     svc.setWorkspaceRegistry(() => ({
-      create: async () => ({ title: 'devuser / work', setTitle: async (t) => { renames2.push(t); } }),
+      create: async () => ({ title: 'work', setTitle: async (t) => { renames2.push(t); } }),
     }));
     await svc.createPlaceholder('h1', '/data/work');
     assert.deepEqual(renames2, []);
@@ -614,5 +614,45 @@ test('workspacePresence de-duplicates concurrent probes and survives a missing r
 
   svc.resolveWorkspaceRegistry = () => undefined;
   assert.deepEqual(await svc.workspacePresence(), { states: [] });
+  ctx.dispose?.();
+});
+
+test('migratePlaceholderTitles rewrites only auto-generated host-prefixed titles', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: true }) });
+  svc.env = { DSH_SSH_REMOTE_ROOT: '/tmp/dsh-migrate-root' };
+  svc.setStoredResolver((id) => (id === 'h1' ? { id: 'h1', name: 'devuser' } : undefined));
+  const renames = [];
+  const placeholder = (id, remote, title) => ({
+    id,
+    path: '/tmp/dsh-migrate-root/h1/' + encodeRemotePath(remote),
+    title,
+    setTitle: async (value) => { renames.push([id, value]); },
+  });
+  const entities = [
+    placeholder('w1', '/data/work', 'devuser / work'),
+    placeholder('w2', '/data/other', 'other · devuser'),
+    placeholder('w3', '/data/kept', 'my custom name'),
+    placeholder('w4', '/data/base', 'base'),
+    { id: 'w5', path: '/Users/me/local-folder', title: 'devuser / local-folder', setTitle: async (value) => { renames.push(['w5', value]); } },
+  ];
+  const renamed = await svc.migratePlaceholderTitles(entities);
+  assert.equal(renamed, 2);
+  assert.deepEqual(renames, [['w1', 'work'], ['w2', 'other']]);
+  ctx.dispose?.();
+});
+
+test('workspacePresence reports the host display name for the sidebar chip', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, { testConnection: async () => ({ ok: true, banner: 'ok' }) });
+  svc.env = { DSH_SSH_REMOTE_ROOT: '/tmp/dsh-presence-root' };
+  svc.setStoredResolver((id) => (id === 'h1' ? { id: 'h1', name: '  build-box  ' } : undefined));
+  svc.resolveWorkspaceRegistry = () => ({
+    list: () => [{ id: 'w1', path: '/tmp/dsh-presence-root/h1/' + encodeRemotePath('/srv/app') }],
+  });
+  const result = await svc.workspacePresence();
+  assert.deepEqual(result.states, [{
+    workspaceId: 'w1', hostId: 'h1', hostName: 'build-box', remotePath: '/srv/app', status: 'online',
+  }]);
   ctx.dispose?.();
 });

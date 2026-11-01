@@ -51,14 +51,16 @@ export function hostDisplayName(hosts, hostId) {
 }
 
 /**
- * Placeholder workspace title: host display name / basename (e.g. ubuntu /
- * my-project), so the sidebar can tell which host each workspace belongs to.
- * The host name is prefixed because a bare basename is ambiguous across hosts.
+ * Placeholder workspace title: just the remote basename (e.g. my-project).
+ * The host is deliberately NOT baked into the title any more: the sidebar
+ * renders it as a separate chip from `ssh/workspacePresence` metadata, so the
+ * title stays the user's project name and a rename keeps working. Older
+ * auto-generated shapes (`host / basename`, `basename · host`, the base64
+ * segment) are migrated to this form by SshRemoteService.
  * @param remotePath remote absolute path (its basename is used).
- * @param hostDisplayName host display name from {@link hostDisplayName}.
  */
-export function placeholderWorkspaceTitle(remotePath, hostDisplayName) {
-  return hostDisplayName + ' / ' + placeholderDisplayName(remotePath);
+export function placeholderWorkspaceTitle(remotePath) {
+  return placeholderDisplayName(remotePath);
 }
 
 /**

@@ -1059,6 +1059,13 @@ window.__ModuleLoader__.load({
       '[data-row-key^="workspace:"][data-ssh-presence="online"]::after{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.16)}',
       '[data-row-key^="workspace:"][data-ssh-presence="offline"]::after{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.16)}',
       '[data-row-key^="workspace:"]:hover::after{display:none}',
+      // A remote workspace swaps the stock folder glyph for a small server mark
+      // (same slot position, theme colour) and shows the host as a chip before the
+      // project name, so "host / project" no longer has to be one string.
+      '[data-ssh-remote] > span:first-child{display:none}',
+      '[data-ssh-remote]::before{content:"";flex:none;width:16px;height:16px;background:currentColor;color:var(--dsw-alias-label-tertiary,#9a9a9a);-webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222%22%20y%3D%222.6%22%20width%3D%2212%22%20height%3D%224.6%22%20rx%3D%221.2%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%228.8%22%20width%3D%2212%22%20height%3D%224.6%22%20rx%3D%221.2%22%2F%3E%3Ccircle%20cx%3D%224.4%22%20cy%3D%224.9%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%224.4%22%20cy%3D%2211.1%22%20r%3D%22.8%22%2F%3E%3C%2Fsvg%3E") no-repeat center/contain;mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222%22%20y%3D%222.6%22%20width%3D%2212%22%20height%3D%224.6%22%20rx%3D%221.2%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%228.8%22%20width%3D%2212%22%20height%3D%224.6%22%20rx%3D%221.2%22%2F%3E%3Ccircle%20cx%3D%224.4%22%20cy%3D%224.9%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%224.4%22%20cy%3D%2211.1%22%20r%3D%22.8%22%2F%3E%3C%2Fsvg%3E") no-repeat center/contain}',
+      '[data-ssh-remote]:hover::before{display:none}',
+      '[data-ssh-host]::before{content:attr(data-ssh-host);display:inline-block;margin-inline-end:6px;padding:0 5px;border-radius:5px;background:var(--dsw-alias-bg-layer-2,#2a2b30);color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:10px;line-height:16px;vertical-align:1px;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       "@media (max-width:560px){.tk-form-grid{grid-template-columns:1fr}.tk-col-2,.tk-col-3,.tk-col-4,.tk-col-6{grid-column:1/-1}.tk-card{flex-direction:column}.tk-card-actions{width:100%;justify-content:flex-end}}"
     ].join("");
     if (typeof document !== "undefined") {
@@ -2889,7 +2896,9 @@ window.__ModuleLoader__.load({
       if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
       var t = ctx.locale.bind("workspace.ssh");
       var ATTR = "data-ssh-presence";
-      var statusById = {};
+      var REMOTE_ATTR = "data-ssh-remote";
+      var HOST_ATTR = "data-ssh-host";
+      var stateById = {};
       var disposed = false;
       var pollTimer = null;
       var paintTimer = null;
@@ -2901,6 +2910,28 @@ window.__ModuleLoader__.load({
           return [];
         }
       }
+      // The title span is stock-rendered; it is the only element carrying the
+      // CSS-module suffix "_title" inside a workspace row (the row itself is
+      // "_projectRow"). Fall back to the documented child order
+      // [folder, chevron, projectText, rowActions] if the suffix changes.
+      function titleNode(row) {
+        var title = null;
+        try {
+          title = row.querySelector('[class*="_title"]');
+        } catch (err) {
+          title = null;
+        }
+        if (title) return title;
+        var box = row.children && row.children.length > 2 ? row.children[2] : null;
+        return box && box.firstElementChild ? box.firstElementChild : null;
+      }
+      function clearRow(row) {
+        row.removeAttribute(ATTR);
+        row.removeAttribute(REMOTE_ATTR);
+        row.removeAttribute("title");
+        var title = titleNode(row);
+        if (title) title.removeAttribute(HOST_ATTR);
+      }
       function paint() {
         paintTimer = null;
         if (disposed) return;
@@ -2908,15 +2939,25 @@ window.__ModuleLoader__.load({
         for (var i = 0; i < nodes.length; i++) {
           var row = nodes[i];
           var key = row.getAttribute("data-row-key") || "";
-          var status = statusById[key.slice("workspace:".length)];
-          if (status === "online" || status === "offline") {
-            if (row.getAttribute(ATTR) !== status) {
-              row.setAttribute(ATTR, status);
-              row.setAttribute("title", t(status === "online" ? "presence.online" : "presence.offline"));
+          var info = stateById[key.slice("workspace:".length)];
+          var status = info && (info.status === "online" || info.status === "offline") ? info.status : null;
+          if (status === null) {
+            if (row.hasAttribute(ATTR) || row.hasAttribute(REMOTE_ATTR)) clearRow(row);
+            continue;
+          }
+          if (!row.hasAttribute(REMOTE_ATTR)) row.setAttribute(REMOTE_ATTR, "");
+          if (row.getAttribute(ATTR) !== status) {
+            row.setAttribute(ATTR, status);
+            row.setAttribute("title", t(status === "online" ? "presence.online" : "presence.offline"));
+          }
+          var title = titleNode(row);
+          if (title) {
+            var host = info && typeof info.hostName === "string" ? info.hostName : "";
+            if (host) {
+              if (title.getAttribute(HOST_ATTR) !== host) title.setAttribute(HOST_ATTR, host);
+            } else if (title.hasAttribute(HOST_ATTR)) {
+              title.removeAttribute(HOST_ATTR);
             }
-          } else if (row.hasAttribute(ATTR)) {
-            row.removeAttribute(ATTR);
-            row.removeAttribute("title");
           }
         }
       }
@@ -2936,9 +2977,14 @@ window.__ModuleLoader__.load({
             var next = {};
             for (var i = 0; i < states.length; i++) {
               var state = states[i];
-              if (state && typeof state.workspaceId === "string") next[state.workspaceId] = state.status;
+              if (state && typeof state.workspaceId === "string") {
+                next[state.workspaceId] = {
+                  status: state.status,
+                  hostName: typeof state.hostName === "string" ? state.hostName : "",
+                };
+              }
             }
-            statusById = next;
+            stateById = next;
             paint();
           }, function () { /* remote not mounted yet; the next poll retries */ });
       }
@@ -2955,10 +3001,7 @@ window.__ModuleLoader__.load({
           if (pollTimer !== null) window.clearInterval(pollTimer);
           if (paintTimer !== null) window.clearTimeout(paintTimer);
           var nodes = rows();
-          for (var i = 0; i < nodes.length; i++) {
-            nodes[i].removeAttribute(ATTR);
-            nodes[i].removeAttribute("title");
-          }
+          for (var i = 0; i < nodes.length; i++) clearRow(nodes[i]);
         };
       }, "dsh-ssh-toolkit: sidebar presence dots");
     }
