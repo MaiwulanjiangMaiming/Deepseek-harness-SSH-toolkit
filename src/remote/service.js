@@ -15,7 +15,7 @@ import { Service } from '@deepseek-ai/cordis';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { SshError, HOST_KEY_UNKNOWN_STAGE, sshKeyFingerprint, sshKeyTypeFromBlob, appendKnownHost, defaultKnownHostsPath } from '../ssh/pool.js';
 import { createPlaceholderDir, hostDisplayName, placeholderWorkspaceTitle } from '../workspace/placeholder.js';
-import { encodeRemotePath } from '../workspace/router.js';
+import { encodeRemotePath, mapLocalToRemote } from '../workspace/router.js';
 import { HOST_TYPERT_CONTRIBUTION, REMOTE_SERVICE, assertContributionShape } from './contract.js';
 import { mergeTestConfig, mergeHostPatch, validateHostConfig, formatHostErrors, redactHosts, hostsSecretsList } from '../hosts/model.js';
 import { readHostsDoc } from '../hosts/domain.js';
@@ -57,6 +57,12 @@ async function acquireStoredOrHostKeyUnknown(acquireFn, id) {
   }
 }
 
+// Reachability cache for the sidebar dots. The client polls every 20s and this
+// window is deliberately longer than one poll: an idle sidebar then dials each
+// host about once a minute instead of every tick, and a slow/offline host is
+// never redialed while its last result is still fresh.
+const PRESENCE_TTL_MS = 45_000;
+
 export class SshRemoteService extends Service {
   constructor(ctx, sshPool) {
     super(ctx, REMOTE_SERVICE);
@@ -69,6 +75,10 @@ export class SshRemoteService extends Service {
     // (the official workspace.create wire carries no title).
     this.resolveWorkspaceRegistry = () => this.ctx?.get?.('workspaceRegistry');
     this.env = process.env; // environment for placeholder-root resolution (DSH_SSH_REMOTE_ROOT > DSH_HOME > ~/.dsh); injectable in tests
+    // Sidebar presence probes: cached per host id (see workspacePresence) and
+    // de-duplicated so overlapping polls never open parallel connections.
+    this.presenceCache = new Map(); // hostId → { at, status }
+    this.presenceInflight = new Map(); // hostId → Promise<'online' | 'offline'>
   }
 
   /** Inject-time hook: supply the stored-host lookup (domain access is only safe inside ctx.inject). */
@@ -375,6 +385,88 @@ export class SshRemoteService extends Service {
       throw new SshError({ hostId: id, stage: 'placeholder', message: 'createPlaceholder: ' + (err?.message ?? String(err)), cause: err });
     }
   }
+
+  // ---------- Sidebar presence (online / offline dots) ----------
+  /**
+   * Remote workspace health for the sidebar dots.
+   *
+   * Workspaces whose path is a placeholder (`<root>/<hostId>/<base64url>`, see
+   * src/workspace/router.js) are mapped back to their host through the
+   * reversible router, then each distinct host is probed once. A failed probe
+   * (unreachable, auth rejected, unknown host key) is reported as "offline"
+   * instead of thrown, so one dead host never blanks the whole list. Hosts that
+   * are no longer configured are skipped — their rows get no dot.
+   * @returns { states: [{ workspaceId, hostId, remotePath, status: 'online'|'offline' }] }
+   */
+  async workspacePresence() {
+    const registry = this.resolveWorkspaceRegistry();
+    if (!registry || typeof registry.list !== 'function') return { states: [] };
+    let entities;
+    try {
+      entities = registry.list();
+    } catch {
+      return { states: [] };
+    }
+    const states = [];
+    for (const entity of Array.isArray(entities) ? entities : []) {
+      const localPath = entity && typeof entity.path === 'string' ? entity.path : '';
+      let mapped;
+      try {
+        mapped = mapLocalToRemote(localPath, this.env);
+      } catch {
+        mapped = null;
+      }
+      if (!mapped) continue;
+      let cfg;
+      try {
+        cfg = this.resolveStored(mapped.hostId);
+      } catch {
+        cfg = undefined;
+      }
+      if (!cfg || typeof cfg !== 'object') continue;
+      states.push({ workspaceId: String(entity.id ?? ''), hostId: mapped.hostId, remotePath: mapped.remotePath });
+    }
+    const hostIds = [...new Set(states.map((state) => state.hostId))];
+    const probed = await Promise.all(hostIds.map((hostId) => this.probeHostPresence(hostId)));
+    const statusOf = new Map(hostIds.map((hostId, index) => [hostId, probed[index]]));
+    return {
+      states: states.map((state) => ({ ...state, status: statusOf.get(state.hostId) ?? 'offline' })),
+    };
+  }
+
+  /**
+   * One cached reachability probe for a host. Result reuse window is
+   * PRESENCE_TTL_MS; concurrent callers share one in-flight connection so a
+   * slow/offline host is never dialed twice in parallel.
+   * @param hostId configured host id.
+   * @returns 'online' when the SSH banner/auth round-trip succeeds, else 'offline'.
+   */
+  async probeHostPresence(hostId) {
+    const cached = this.presenceCache.get(hostId);
+    if (cached && Date.now() - cached.at < PRESENCE_TTL_MS) return cached.status;
+    const inflight = this.presenceInflight.get(hostId);
+    if (inflight !== undefined) return inflight;
+    const probe = (async () => {
+      let status = 'offline';
+      try {
+        const cfg = this.resolveStored(hostId);
+        if (cfg && typeof cfg === 'object') {
+          const result = await this.sshPool.testConnection(mergeTestConfig({ id: hostId }, cfg));
+          status = result && result.ok === true ? 'online' : 'offline';
+        }
+      } catch {
+        status = 'offline';
+      }
+      this.presenceCache.set(hostId, { at: Date.now(), status });
+      return status;
+    })();
+    this.presenceInflight.set(hostId, probe);
+    try {
+      return await probe;
+    } finally {
+      if (this.presenceInflight.get(hostId) === probe) this.presenceInflight.delete(hostId);
+    }
+  }
 }
 
 /**
@@ -390,7 +482,8 @@ export function registerRemote(ctx, sshPool) {
     scope.typert.register(HOST_TYPERT_CONTRIBUTION);
     scope.logger?.info('[dsh-ssh-toolkit] typert remote ' + HOST_TYPERT_CONTRIBUTION.package
       + ' registered (ssh/testConnection, ssh/listHosts, ssh/saveHost, ssh/deleteHost,'
-      + ' ssh/listRemoteDir, ssh/statRemote, ssh/resolveRemoteHome, ssh/createPlaceholder, ssh/trustHostKey)');
+      + ' ssh/listRemoteDir, ssh/statRemote, ssh/resolveRemoteHome, ssh/createPlaceholder, ssh/trustHostKey,'
+      + ' ssh/workspacePresence)');
   });
   return service;
 }

@@ -49,6 +49,10 @@ export const TRUST_HOST_KEY_ENDPOINT = REMOTE_NAMESPACE + '/' + TRUST_HOST_KEY_M
 // Import existing hosts from the local OpenSSH client config (~/.ssh/config).
 export const SCAN_SSH_CONFIG_METHOD = 'scanSshConfig';
 export const SCAN_SSH_CONFIG_ENDPOINT = REMOTE_NAMESPACE + '/' + SCAN_SSH_CONFIG_METHOD;
+// Sidebar presence dots: which placeholder workspaces point at which host, and
+// whether that host answers right now (cached host-side, so polling is cheap).
+export const WORKSPACE_PRESENCE_METHOD = 'workspacePresence';
+export const WORKSPACE_PRESENCE_ENDPOINT = REMOTE_NAMESPACE + '/' + WORKSPACE_PRESENCE_METHOD;
 
 const SRC_JSON = { mode: 'src-json' };
 
@@ -135,6 +139,13 @@ function scanSshConfigDescriptor(client) {
   return descriptor(client, SCAN_SSH_CONFIG_METHOD, [], 'ScanSshConfigResult');
 }
 
+// workspacePresence(): placeholder workspace → host → live reachability, for the
+// sidebar online/offline dot. No wire arguments: the host owns the mapping through
+// the workspace registry and probes each host at most once per TTL.
+function workspacePresenceDescriptor(client) {
+  return descriptor(client, WORKSPACE_PRESENCE_METHOD, [], 'WorkspacePresenceResult');
+}
+
 /** Host-side contribution: ctx.typert.register(this) makes the gateway claim the /api/ssh/* endpoints. */
 export const HOST_TYPERT_CONTRIBUTION = Object.freeze({
   package: REMOTE_PACKAGE,
@@ -151,6 +162,7 @@ export const HOST_TYPERT_CONTRIBUTION = Object.freeze({
     Object.freeze(createPlaceholderDescriptor(false)),
     Object.freeze(trustHostKeyDescriptor(false)),
     Object.freeze(scanSshConfigDescriptor(false)),
+    Object.freeze(workspacePresenceDescriptor(false)),
   ]),
   model: undefined,
 });
@@ -169,6 +181,7 @@ export const CLIENT_TYPERT_REMOTE = Object.freeze({
     Object.freeze(createPlaceholderDescriptor(true)),
     Object.freeze(trustHostKeyDescriptor(true)),
     Object.freeze(scanSshConfigDescriptor(true)),
+    Object.freeze(workspacePresenceDescriptor(true)),
   ]),
 });
 

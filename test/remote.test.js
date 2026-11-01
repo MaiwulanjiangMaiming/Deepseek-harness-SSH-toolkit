@@ -547,3 +547,72 @@ test('resolveRemoteHome surfaces a host-key-unknown as a structured VALUE (not a
   assert.equal(res.keyType, 'ssh-ed25519');
   ctx.dispose?.();
 });
+
+test('workspacePresence maps placeholder workspaces to hosts and caches each probe', async () => {
+  const ctx = new Context();
+  const probed = [];
+  const pool = {
+    testConnection: async (cfg) => {
+      probed.push(cfg.id);
+      return cfg.id === 'h1' ? { ok: true, banner: 'ok' } : { ok: false, error: 'unreachable' };
+    },
+  };
+  const svc = new SshRemoteService(ctx, pool);
+  svc.env = { DSH_SSH_REMOTE_ROOT: '/tmp/dsh-presence-root' };
+  const stored = {
+    h1: { id: 'h1', host: 'a.example', port: 22, user: 'u', auth: { type: 'key' } },
+    h2: { id: 'h2', host: 'b.example', port: 22, user: 'u', auth: { type: 'key' } },
+  };
+  svc.setStoredResolver((id) => stored[id]);
+  svc.resolveWorkspaceRegistry = () => ({
+    list: () => [
+      { id: 'w1', path: '/tmp/dsh-presence-root/h1/' + encodeRemotePath('/srv/app') },
+      { id: 'w2', path: '/tmp/dsh-presence-root/h2/' + encodeRemotePath('/data') },
+      { id: 'w3', path: '/tmp/dsh-presence-root/gone/' + encodeRemotePath('/x') },
+      { id: 'w4', path: '/Users/me/plain-local-folder' },
+    ],
+  });
+
+  const first = await svc.workspacePresence();
+  assert.deepEqual(first.states.map((s) => [s.workspaceId, s.hostId, s.remotePath, s.status]), [
+    ['w1', 'h1', '/srv/app', 'online'],
+    ['w2', 'h2', '/data', 'offline'],
+  ]);
+  assert.deepEqual(probed.sort(), ['h1', 'h2']);
+
+  // Second poll inside the TTL reuses the cache (no new connections).
+  await svc.workspacePresence();
+  assert.equal(probed.length, 2);
+
+  // Expired entries probe again.
+  for (const entry of svc.presenceCache.values()) entry.at = 0;
+  await svc.workspacePresence();
+  assert.equal(probed.length, 4);
+  ctx.dispose?.();
+});
+
+test('workspacePresence de-duplicates concurrent probes and survives a missing registry', async () => {
+  const ctx = new Context();
+  let opens = 0;
+  const pool = {
+    testConnection: async () => {
+      opens += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { ok: true, banner: 'ok' };
+    },
+  };
+  const svc = new SshRemoteService(ctx, pool);
+  svc.env = { DSH_SSH_REMOTE_ROOT: '/tmp/dsh-presence-root' };
+  svc.setStoredResolver((id) => ({ id, host: id + '.example', port: 22, user: 'u', auth: { type: 'key' } }));
+  svc.resolveWorkspaceRegistry = () => ({
+    list: () => [{ id: 'w1', path: '/tmp/dsh-presence-root/h9/' + encodeRemotePath('/repo') }],
+  });
+  const [a, b] = await Promise.all([svc.workspacePresence(), svc.workspacePresence()]);
+  assert.equal(a.states[0].status, 'online');
+  assert.equal(b.states[0].status, 'online');
+  assert.equal(opens, 1);
+
+  svc.resolveWorkspaceRegistry = () => undefined;
+  assert.deepEqual(await svc.workspacePresence(), { states: [] });
+  ctx.dispose?.();
+});

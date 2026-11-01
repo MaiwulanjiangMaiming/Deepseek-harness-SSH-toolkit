@@ -263,6 +263,8 @@ window.__ModuleLoader__.load({
       "trust.trusting": "正在保存…",
       "trust.cancel": "取消",
       "trust.error": "保存失败",
+      "presence.online": "SSH 在线",
+      "presence.offline": "SSH 离线",
     };
     var SSH_EN = {
       "title": "Select Workspace Directory",
@@ -310,6 +312,8 @@ window.__ModuleLoader__.load({
       "trust.trusting": "Saving…",
       "trust.cancel": "Cancel",
       "trust.error": "Failed to save",
+      "presence.online": "SSH online",
+      "presence.offline": "SSH offline",
     };
 
     // ---------- pure model helpers (inline copy of lib/hosts-model.js) ----------
@@ -459,6 +463,7 @@ window.__ModuleLoader__.load({
         remoteDescriptor('createPlaceholder', ['hostId', 'remotePath'], 'CreatePlaceholderResult'),
         remoteDescriptor('trustHostKey', ['hostId', 'rawKeyBase64', 'fingerprint'], 'TrustHostKeyResult'),
         remoteDescriptor('scanSshConfig', [], 'ScanSshConfigResult'),
+        remoteDescriptor('workspacePresence', [], 'WorkspacePresenceResult'),
       ],
     };
 
@@ -1045,6 +1050,15 @@ window.__ModuleLoader__.load({
       ".dsh-local-actions{display:flex;justify-content:flex-end;gap:8px}",
       ".dsh-newfolder{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:12px;background:var(--dsw-alias-bg-layer-1,#1c1d21)}",
       ".dsh-newfolder-input{height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font-size:13px;width:100%;box-sizing:border-box}",
+      // Sidebar presence dot on remote workspace rows. DSH 0.2.1 exposes no slot
+      // for decorating a workspace row, so the row's own stable data-row-key
+      // ("workspace:<id>") carries our data-ssh-presence attribute and the dot is
+      // drawn by ::after — no extra DOM node for React to reconcile. Hidden on
+      // hover so the stock row actions keep their place.
+      '[data-row-key^="workspace:"][data-ssh-presence]::after{content:"";flex:none;width:6px;height:6px;border-radius:999px;margin-inline-start:8px;background:var(--dsw-alias-label-tertiary,#8b949e)}',
+      '[data-row-key^="workspace:"][data-ssh-presence="online"]::after{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.16)}',
+      '[data-row-key^="workspace:"][data-ssh-presence="offline"]::after{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.16)}',
+      '[data-row-key^="workspace:"]:hover::after{display:none}',
       "@media (max-width:560px){.tk-form-grid{grid-template-columns:1fr}.tk-col-2,.tk-col-3,.tk-col-4,.tk-col-6{grid-column:1/-1}.tk-card{flex-direction:column}.tk-card-actions{width:100%;justify-content:flex-end}}"
     ].join("");
     if (typeof document !== "undefined") {
@@ -2862,6 +2876,93 @@ window.__ModuleLoader__.load({
         open ? React.createElement("div", { className: SSH_BASH_CSS.bodyWrap }, bodyNode) : null);
     }
 
+    // ---------- sidebar presence dots ----------
+    // DSH 0.2.1 exposes no slot for decorating a workspace row (the sidebar
+    // browser renders those rows itself; only session rows publish action
+    // slots). The row does carry data-row-key="workspace:<workspaceId>" — the
+    // identity stock drag and menus already rely on — so the dot rides that node
+    // as an attribute and is painted by CSS ::after. No DOM node is inserted
+    // into React's child list, so reconciliation cannot fight it.
+    // Poll every 20s; the host keeps each probe for 45s (longer than one poll),
+    // so an idle sidebar dials a host about once a minute, not every tick.
+    function installPresenceDots(ctx, remoteCall) {
+      if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
+      var t = ctx.locale.bind("workspace.ssh");
+      var ATTR = "data-ssh-presence";
+      var statusById = {};
+      var disposed = false;
+      var pollTimer = null;
+      var paintTimer = null;
+
+      function rows() {
+        try {
+          return document.querySelectorAll('[data-row-key^="workspace:"]');
+        } catch (err) {
+          return [];
+        }
+      }
+      function paint() {
+        paintTimer = null;
+        if (disposed) return;
+        var nodes = rows();
+        for (var i = 0; i < nodes.length; i++) {
+          var row = nodes[i];
+          var key = row.getAttribute("data-row-key") || "";
+          var status = statusById[key.slice("workspace:".length)];
+          if (status === "online" || status === "offline") {
+            if (row.getAttribute(ATTR) !== status) {
+              row.setAttribute(ATTR, status);
+              row.setAttribute("title", t(status === "online" ? "presence.online" : "presence.offline"));
+            }
+          } else if (row.hasAttribute(ATTR)) {
+            row.removeAttribute(ATTR);
+            row.removeAttribute("title");
+          }
+        }
+      }
+      function schedulePaint() {
+        if (disposed || paintTimer !== null) return;
+        paintTimer = window.setTimeout(paint, 120);
+      }
+      function poll() {
+        if (disposed) return Promise.resolve();
+        var call = remoteCall("workspacePresence");
+        return Promise.resolve()
+          .then(function () { return call(); })
+          .then(function (response) {
+            var value = unwrapRemoteResponse(response);
+            var states = value && Array.isArray(value.states) ? value.states : null;
+            if (states === null) return;
+            var next = {};
+            for (var i = 0; i < states.length; i++) {
+              var state = states[i];
+              if (state && typeof state.workspaceId === "string") next[state.workspaceId] = state.status;
+            }
+            statusById = next;
+            paint();
+          }, function () { /* remote not mounted yet; the next poll retries */ });
+      }
+      var watchRoot = document.body || document.documentElement;
+      if (!watchRoot) return;
+      var observer = new MutationObserver(schedulePaint);
+      observer.observe(watchRoot, { childList: true, subtree: true });
+      pollTimer = window.setInterval(poll, 20000);
+      poll();
+      ctx.effect(function () {
+        return function () {
+          disposed = true;
+          observer.disconnect();
+          if (pollTimer !== null) window.clearInterval(pollTimer);
+          if (paintTimer !== null) window.clearTimeout(paintTimer);
+          var nodes = rows();
+          for (var i = 0; i < nodes.length; i++) {
+            nodes[i].removeAttribute(ATTR);
+            nodes[i].removeAttribute("title");
+          }
+        };
+      }, "dsh-ssh-toolkit: sidebar presence dots");
+    }
+
     // ---------- registration ----------
     var inject = ["slots", "uiWorkspace", "locale", "remote"];
 
@@ -3023,6 +3124,10 @@ window.__ModuleLoader__.load({
           t: ctx.locale.bind("workspace.ssh"),
         };
       };
+      // Online/offline dot on each remote workspace row in the sidebar (see
+      // installPresenceDots). Registered here so remoteCall's mount guard is in
+      // scope; the first poll may reject until $mount lands and retries later.
+      installPresenceDots(ctx, remoteCall);
       ctx.slots.inject("conversation.hero.workspace.directoryFlow", function () {
         return ctx.slots.inject("sidebar.workspaces.directoryFlow", function* () {
           yield ctx.slots.register({
