@@ -134,6 +134,8 @@ window.__ModuleLoader__.load({
       "trust.trusting": "正在保存…",
       "trust.cancel": "取消",
       "trust.error": "保存失败",
+      "upToDate": "已是最新版本",
+      "updateAvailable": "有新版本 v{version} · 查看",
     };
     var EN = {
       "nav": "SSH Connections",
@@ -215,6 +217,8 @@ window.__ModuleLoader__.load({
       "trust.trusting": "Saving…",
       "trust.cancel": "Cancel",
       "trust.error": "Failed to save",
+      "upToDate": "Up to date",
+      "updateAvailable": "Update available: v{version}",
     };
     // directoryFlow occupant locale (new namespace workspace.ssh)
     var SSH_ZH = {
@@ -468,6 +472,7 @@ window.__ModuleLoader__.load({
         remoteDescriptor('trustHostKey', ['hostId', 'rawKeyBase64', 'fingerprint'], 'TrustHostKeyResult'),
         remoteDescriptor('scanSshConfig', [], 'ScanSshConfigResult'),
         remoteDescriptor('workspacePresence', [], 'WorkspacePresenceResult'),
+        remoteDescriptor('checkUpdate', [], 'CheckUpdateResult'),
       ],
     };
 
@@ -1030,6 +1035,10 @@ window.__ModuleLoader__.load({
       ".dsh-trust-value{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e6);word-break:break-all}",
       ".dsh-trust-fp{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:20px;color:var(--dsw-alias-label-primary,#e6e6e6);word-break:break-all}",
       ".dsh-trust-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
+      ".tk-version{display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l2,#36373b);font-size:11px;line-height:14px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
+      ".tk-version-link{padding:0;border:0;background:none;color:var(--dsw-alias-link,#4e9bff);font:inherit;cursor:pointer;text-decoration:underline}",
+      ".tk-version-link:hover{color:var(--dsw-alias-link-hover,#6cb0ff)}",
+      ".tk-version-ok{color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
       ".dsh-remote-dialog{width:min(520px,100%);box-sizing:border-box;overflow:hidden}",
       ".dsh-remote-pick,.dsh-remote-browse{display:flex;flex-direction:column;gap:10px;min-height:220px}",
       ".dsh-remote-label{font-size:11px;line-height:14px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
@@ -1403,6 +1412,21 @@ window.__ModuleLoader__.load({
 
       React.useEffect(function () { props.load(); }, []);
 
+      // Footer version probe: the host reads the repo's tags (cached 6h) and tells
+      // us whether a newer release exists. Failure keeps the footer silent.
+      var updateState = React.useState(null);
+      var update = updateState[0];
+      var setUpdate = updateState[1];
+      React.useEffect(function () {
+        var alive = true;
+        Promise.resolve().then(function () { return props.checkUpdate(); }).then(function (response) {
+          if (!alive) return;
+          var value = unwrapRemoteResponse(response);
+          if (value && typeof value === 'object' && typeof value.current === 'string') setUpdate(value);
+        }, function () { /* remote not mounted: nothing to show */ });
+        return function () { alive = false; };
+      }, []);
+
       var hosts = sortedHosts(state.hosts);
       var detected = state.detected || [];
 
@@ -1581,6 +1605,21 @@ window.__ModuleLoader__.load({
         )
       }) : null;
 
+      var versionFooter = React.createElement("div", { className: "tk-version" },
+        React.createElement("span", null, "dsh-ssh-toolkit" + (update && update.current ? " v" + update.current : "")),
+        update && update.updateAvailable
+          ? React.createElement("button", {
+              type: "button",
+              className: "tk-version-link",
+              onClick: function () {
+                try { window.open(update.url, "_blank", "noopener,noreferrer"); } catch (e) {}
+              }
+            }, t("updateAvailable", { version: update.latest }))
+          : update && !update.error && update.current
+            ? React.createElement("span", { className: "tk-version-ok" }, t("upToDate"))
+            : null
+      );
+
       return React.createElement(React.Fragment, null,
         React.createElement("div", { className: "tk-page" },
           header,
@@ -1593,7 +1632,8 @@ window.__ModuleLoader__.load({
             patchForm: props.patchForm, saveForm: props.saveForm, cancelForm: props.cancelForm,
             testConnectionForm: props.testConnectionForm, dismissFormTest: props.dismissFormTest
           }) : body,
-          formOpen ? null : importPanel
+          formOpen ? null : importPanel,
+          versionFooter
         ),
         deleteModal,
         React.createElement(TrustHostKeyModal, {
@@ -3158,6 +3198,14 @@ window.__ModuleLoader__.load({
       var injected = function () {
         return {
           hooks: { sshHosts: controller.store },
+          // Settings footer: version probe. Same mount guard as remoteCall (defined
+          // below, so it cannot be reused here); a not-yet-mounted $mount rejects and
+          // the footer simply stays hidden.
+          checkUpdate: function () {
+            var ssh = getSsh();
+            if (!ssh || typeof ssh.checkUpdate !== 'function') return Promise.reject(new Error(remoteError()));
+            return ssh.checkUpdate();
+          },
           load: controller.load,
           beginAdd: controller.beginAdd,
           beginEdit: controller.beginEdit,

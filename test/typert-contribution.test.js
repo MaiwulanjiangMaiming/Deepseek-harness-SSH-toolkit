@@ -9,7 +9,7 @@ import {
   assertContributionShape, allClientCodecsStrict,
   TEST_CONNECTION_ENDPOINT, LIST_HOSTS_ENDPOINT, SAVE_HOST_ENDPOINT, DELETE_HOST_ENDPOINT,
   LIST_REMOTE_DIR_ENDPOINT, STAT_REMOTE_ENDPOINT, RESOLVE_REMOTE_HOME_ENDPOINT, CREATE_PLACEHOLDER_ENDPOINT,
-  TRUST_HOST_KEY_ENDPOINT, SCAN_SSH_CONFIG_ENDPOINT, WORKSPACE_PRESENCE_ENDPOINT,
+  TRUST_HOST_KEY_ENDPOINT, SCAN_SSH_CONFIG_ENDPOINT, WORKSPACE_PRESENCE_ENDPOINT, CHECK_UPDATE_ENDPOINT,
   REMOTE_PACKAGE, REMOTE_SERVICE, REMOTE_NAMESPACE,
 } from '../src/remote/contract.js';
 
@@ -33,9 +33,10 @@ test('endpoint identity is stable and shared', () => {
   assert.equal(CREATE_PLACEHOLDER_ENDPOINT, 'ssh/createPlaceholder');
   assert.equal(TRUST_HOST_KEY_ENDPOINT, 'ssh/trustHostKey');
   assert.equal(WORKSPACE_PRESENCE_ENDPOINT, 'ssh/workspacePresence');
-  assert.equal(HOST_TYPERT_CONTRIBUTION.invocations.length, 11);
-  assert.equal(CLIENT_TYPERT_REMOTE.descriptors.length, 11);
-  for (let i = 0; i < 11; i++) {
+  assert.equal(CHECK_UPDATE_ENDPOINT, 'ssh/checkUpdate');
+  assert.equal(HOST_TYPERT_CONTRIBUTION.invocations.length, 12);
+  assert.equal(CLIENT_TYPERT_REMOTE.descriptors.length, 12);
+  for (let i = 0; i < 12; i++) {
     const host = HOST_TYPERT_CONTRIBUTION.invocations[i];
     const client = CLIENT_TYPERT_REMOTE.descriptors[i];
     assert.equal(host.namespace + '/' + host.method, client.namespace + '/' + client.method);
@@ -72,6 +73,8 @@ test('CRUD wire args: listHosts has none; saveHost/deleteHost carry id (+patch) 
   assertWires(SCAN_SSH_CONFIG_ENDPOINT, []);
   // workspacePresence takes no wire arguments; the host owns the mapping.
   assertWires(WORKSPACE_PRESENCE_ENDPOINT, []);
+  // checkUpdate takes no wire arguments; the host owns the GitHub read and cache.
+  assertWires(CHECK_UPDATE_ENDPOINT, []);
 });
 
 test('host descriptors use src-json codecs (no bundle validation)', () => {

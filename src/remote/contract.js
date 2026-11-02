@@ -53,6 +53,9 @@ export const SCAN_SSH_CONFIG_ENDPOINT = REMOTE_NAMESPACE + '/' + SCAN_SSH_CONFIG
 // whether that host answers right now (cached host-side, so polling is cheap).
 export const WORKSPACE_PRESENCE_METHOD = 'workspacePresence';
 export const WORKSPACE_PRESENCE_ENDPOINT = REMOTE_NAMESPACE + '/' + WORKSPACE_PRESENCE_METHOD;
+// Update check: the highest stable tag in the GitHub repo versus package.json.
+export const CHECK_UPDATE_METHOD = 'checkUpdate';
+export const CHECK_UPDATE_ENDPOINT = REMOTE_NAMESPACE + '/' + CHECK_UPDATE_METHOD;
 
 const SRC_JSON = { mode: 'src-json' };
 
@@ -146,6 +149,12 @@ function workspacePresenceDescriptor(client) {
   return descriptor(client, WORKSPACE_PRESENCE_METHOD, [], 'WorkspacePresenceResult');
 }
 
+// checkUpdate(): the settings footer's version probe. No wire arguments;
+// the host owns the GitHub tags read and the 6h cache.
+function checkUpdateDescriptor(client) {
+  return descriptor(client, CHECK_UPDATE_METHOD, [], 'CheckUpdateResult');
+}
+
 /** Host-side contribution: ctx.typert.register(this) makes the gateway claim the /api/ssh/* endpoints. */
 export const HOST_TYPERT_CONTRIBUTION = Object.freeze({
   package: REMOTE_PACKAGE,
@@ -163,6 +172,7 @@ export const HOST_TYPERT_CONTRIBUTION = Object.freeze({
     Object.freeze(trustHostKeyDescriptor(false)),
     Object.freeze(scanSshConfigDescriptor(false)),
     Object.freeze(workspacePresenceDescriptor(false)),
+    Object.freeze(checkUpdateDescriptor(false)),
   ]),
   model: undefined,
 });
@@ -182,6 +192,7 @@ export const CLIENT_TYPERT_REMOTE = Object.freeze({
     Object.freeze(trustHostKeyDescriptor(true)),
     Object.freeze(scanSshConfigDescriptor(true)),
     Object.freeze(workspacePresenceDescriptor(true)),
+    Object.freeze(checkUpdateDescriptor(true)),
   ]),
 });
 

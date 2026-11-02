@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { bindTypertRemote, remoteMethods } from '@deepseek-ai/dsh-typert-protocol';
-import { SshRemoteService } from '../src/remote/service.js';
+import { SshRemoteService, parseSemver, compareSemver, latestVersionTag } from '../src/remote/service.js';
 import { SshError, HOST_KEY_UNKNOWN_STAGE, sshKeyFingerprint, sshKeyTypeFromBlob, knownHostsLine } from '../src/ssh/pool.js';
 import { encodeRemotePath } from '../src/workspace/router.js';
 import { HOST_TYPERT_CONTRIBUTION } from '../src/remote/contract.js';
@@ -654,5 +654,58 @@ test('workspacePresence reports the host display name for the sidebar chip', asy
   assert.deepEqual(result.states, [{
     workspaceId: 'w1', hostId: 'h1', hostName: 'build-box', remotePath: '/srv/app', status: 'online',
   }]);
+  ctx.dispose?.();
+});
+
+test('update helpers: stable semver only, highest tag wins', () => {
+  assert.deepEqual(parseSemver('1.2.3'), [1, 2, 3]);
+  assert.deepEqual(parseSemver('v1.2.3'), [1, 2, 3]);
+  assert.equal(parseSemver('1.2'), null);
+  assert.equal(parseSemver('v1.4.0-rc.1'), null);
+  assert.equal(parseSemver(undefined), null);
+  assert.equal(compareSemver([1, 2, 3], [1, 3, 0]), -1);
+  assert.equal(compareSemver([1, 10, 0], [1, 9, 9]), 1);
+  assert.equal(compareSemver([1, 2, 3], [1, 2, 3]), 0);
+  const best = latestVersionTag([{ name: 'v1.4.0' }, { name: 'v1.10.0' }, { name: 'nightly' }, { name: 'v1.9.9' }]);
+  assert.equal(best.tag, 'v1.10.0');
+  assert.equal(best.version, '1.10.0');
+  assert.equal(latestVersionTag([]), null);
+  assert.equal(latestVersionTag('nope'), null);
+});
+
+test('checkUpdate compares the highest tag with the package version and caches', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, {});
+  svc.version = '1.3.0';
+  let calls = 0;
+  svc.fetchImpl = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => [{ name: 'v1.4.0' }, { name: 'v1.2.0' }] };
+  };
+  const first = await svc.checkUpdate();
+  assert.equal(first.current, '1.3.0');
+  assert.equal(first.latest, '1.4.0');
+  assert.equal(first.updateAvailable, true);
+  assert.equal(first.error, null);
+  assert.equal(first.url, 'https://github.com/MaiwulanjiangMaiming/Deepseek-harness-SSH-toolkit/releases/tag/v1.4.0');
+  // Inside the 6h window the result is reused, without another request.
+  await svc.checkUpdate();
+  assert.equal(calls, 1);
+  // force re-reads; same version as the newest tag is not an update.
+  svc.version = '1.4.0';
+  const same = await svc.checkUpdate(true);
+  assert.equal(calls, 2);
+  assert.equal(same.updateAvailable, false);
+  ctx.dispose?.();
+});
+
+test('checkUpdate degrades to unreachable without throwing', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, {});
+  svc.fetchImpl = async () => { throw new Error('offline'); };
+  const result = await svc.checkUpdate();
+  assert.equal(result.error, 'unreachable');
+  assert.equal(result.latest, null);
+  assert.equal(result.updateAvailable, false);
   ctx.dispose?.();
 });

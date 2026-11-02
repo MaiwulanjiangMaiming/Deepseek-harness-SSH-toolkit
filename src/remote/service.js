@@ -12,6 +12,7 @@
 // password-auth host can be tested/saved even when the form left the password
 // blank; listHosts redacts before the value leaves the process.
 import { Service } from '@deepseek-ai/cordis';
+import { readFileSync } from 'node:fs';
 import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { SshError, HOST_KEY_UNKNOWN_STAGE, sshKeyFingerprint, sshKeyTypeFromBlob, appendKnownHost, defaultKnownHostsPath } from '../ssh/pool.js';
 import { createPlaceholderDir, hostDisplayName, placeholderDisplayName, placeholderWorkspaceTitle } from '../workspace/placeholder.js';
@@ -74,6 +75,61 @@ function isLegacyPlaceholderTitle(title, remotePath, hostName) {
     || title === base + ' · ' + hostName;
 }
 
+// ── Update check (GitHub tags) ─────────────────────────────────────────────
+// The desktop Harness has no update prompt for third-party plugins (only the
+// official catalog gets installTarget/Update), and this package is not on npm.
+// So the settings section asks this service, which reads the repo's tags and
+// compares the highest semver against our own package.json version.
+const UPDATE_REPO = 'MaiwulanjiangMaiming/Deepseek-harness-SSH-toolkit';
+const UPDATE_TAGS_URL = 'https://api.github.com/repos/' + UPDATE_REPO + '/tags?per_page=100';
+const UPDATE_RELEASES_URL = 'https://github.com/' + UPDATE_REPO + '/releases';
+const UPDATE_TTL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_FAILURE_TTL_MS = 10 * 60 * 1000;
+const PLUGIN_VERSION = (() => {
+  try {
+    return String(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version || '0.0.0');
+  } catch {
+    return '0.0.0';
+  }
+})();
+
+/** Parse "1.2.3" or "v1.2.3" into [major, minor, patch]; null for anything else (rc/, nightly, etc.). */
+export function parseSemver(value) {
+  if (typeof value !== 'string') return null;
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Semver ordering for parseSemver tuples: negative when a < b, 0 when equal, positive when a > b. */
+export function compareSemver(a, b) {
+  if (!a || !b) return 0;
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Highest stable semver tag in a GitHub tags payload.
+ * @param tags - API payload: [{ name: 'v1.2.3' }, ...] (strings also accepted).
+ * @returns { tag, version, semver } | null when the repo has no stable tag yet.
+ */
+export function latestVersionTag(tags) {
+  if (!Array.isArray(tags)) return null;
+  let best = null;
+  for (const entry of tags) {
+    const raw = typeof entry === 'string' ? entry : entry && typeof entry.name === 'string' ? entry.name : '';
+    const semver = parseSemver(raw);
+    if (!semver) continue;
+    if (best === null || compareSemver(semver, best.semver) > 0) {
+      const name = raw.trim();
+      best = { tag: name, version: name.replace(/^v/, ''), semver };
+    }
+  }
+  return best;
+}
+
 // Reachability cache for the sidebar dots. The client polls every 20s and this
 // window is deliberately longer than one poll: an idle sidebar then dials each
 // host about once a minute instead of every tick, and a slow/offline host is
@@ -97,6 +153,12 @@ export class SshRemoteService extends Service {
     this.presenceCache = new Map(); // hostId → { at, status }
     this.presenceInflight = new Map(); // hostId → Promise<'online' | 'offline'>
     this.titlesMigrated = false; // one legacy auto-title pass per process (first presence poll)
+    // Update check state: one GitHub tags read per TTL (shorter after a failure),
+    // and an injectable fetch so tests never touch the network.
+    this.version = PLUGIN_VERSION;
+    this.updateResult = null;
+    this.updateCheckedAt = 0;
+    this.fetchImpl = (...args) => fetch(...args);
   }
 
   /** Inject-time hook: supply the stored-host lookup (domain access is only safe inside ctx.inject). */
@@ -497,6 +559,56 @@ export class SshRemoteService extends Service {
       }
     }
     return renamed;
+  }
+
+  /**
+   * Version check against the repository's tags for the settings footer.
+   *
+   * A read-only, best-effort probe: GitHub being unreachable is reported as
+   * `{ error: 'unreachable' }` and never throws, so opening Settings can never
+   * fail because of it. Results are cached for 6h (10 min after a failure).
+   * @param force - bypass the cache (a manual re-check).
+   * @returns { current, latest, tag, updateAvailable, url, checkedAt, error }
+   */
+  async checkUpdate(force) {
+    const now = Date.now();
+    const ttl = this.updateResult && this.updateResult.error ? UPDATE_FAILURE_TTL_MS : UPDATE_TTL_MS;
+    if (!force && this.updateResult !== null && now - this.updateCheckedAt < ttl) return this.updateResult;
+    let result;
+    try {
+      const response = await this.fetchImpl(UPDATE_TAGS_URL, {
+        headers: {
+          accept: 'application/vnd.github+json',
+          'user-agent': 'dsh-ssh-toolkit/' + this.version,
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!response || response.ok !== true) throw new Error('github tags: status ' + (response && response.status));
+      const best = latestVersionTag(await response.json());
+      const currentSemver = parseSemver(this.version);
+      result = {
+        current: this.version,
+        latest: best === null ? null : best.version,
+        tag: best === null ? null : best.tag,
+        updateAvailable: best !== null && currentSemver !== null && compareSemver(best.semver, currentSemver) > 0,
+        url: best === null ? UPDATE_RELEASES_URL : UPDATE_RELEASES_URL + '/tag/' + best.tag,
+        checkedAt: now,
+        error: null,
+      };
+    } catch {
+      result = {
+        current: this.version,
+        latest: null,
+        tag: null,
+        updateAvailable: false,
+        url: null,
+        checkedAt: now,
+        error: 'unreachable',
+      };
+    }
+    this.updateResult = result;
+    this.updateCheckedAt = now;
+    return result;
   }
 
   /**
