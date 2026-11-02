@@ -246,6 +246,8 @@ window.__ModuleLoader__.load({
       "cancel": "取消",
       "loading": "正在加载…",
       "emptyDir": "此文件夹为空",
+      "filterPh": "输入文件夹名筛选…",
+      "filterNone": "没有匹配项：{query}",
       "loadHostsFailed": "无法读取主机列表",
       "loadDirFailed": "无法读取远端文件夹",
       "placeholderFailed": "无法连接到此目录",
@@ -295,6 +297,8 @@ window.__ModuleLoader__.load({
       "cancel": "Cancel",
       "loading": "Loading…",
       "emptyDir": "This folder is empty",
+      "filterPh": "Type to filter folders…",
+      "filterNone": "No match for \u201c{query}\u201d",
       "loadHostsFailed": "Couldn’t load hosts",
       "loadDirFailed": "Couldn’t read the remote folder",
       "placeholderFailed": "Couldn’t connect to this folder",
@@ -1026,7 +1030,7 @@ window.__ModuleLoader__.load({
       ".dsh-trust-value{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e6);word-break:break-all}",
       ".dsh-trust-fp{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:20px;color:var(--dsw-alias-label-primary,#e6e6e6);word-break:break-all}",
       ".dsh-trust-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
-      ".dsh-remote-dialog{width:min(560px,100%)}",
+      ".dsh-remote-dialog{width:min(520px,100%);box-sizing:border-box;overflow:hidden}",
       ".dsh-remote-pick,.dsh-remote-browse{display:flex;flex-direction:column;gap:10px;min-height:220px}",
       ".dsh-remote-label{font-size:11px;line-height:14px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
       ".dsh-remote-empty{display:flex;align-items:center;justify-content:center;min-height:140px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:12px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:13px;text-align:center}",
@@ -1034,13 +1038,18 @@ window.__ModuleLoader__.load({
       ".dsh-remote-pathbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}",
       ".dsh-remote-hostswitch{flex:none;min-width:180px;max-width:220px}",
       ".dsh-remote-path{flex:1;min-width:0;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary,#b8b8b8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}",
-      ".dsh-remote-list{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto}",
-      ".dsh-remote-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:13px;line-height:18px;text-align:left;cursor:pointer}",
+      ".dsh-remote-list{display:flex;flex-direction:column;gap:2px;width:100%;height:240px;box-sizing:border-box;overflow-y:auto;overflow-x:hidden}",
+      ".dsh-remote-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;box-sizing:border-box;padding:6px 8px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,#e6e6e6);font-size:13px;line-height:18px;text-align:left;cursor:pointer}",
       ".dsh-remote-row:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2,#232529)}",
       ".dsh-remote-row:disabled{opacity:.5;cursor:default}",
       ".dsh-remote-row-file{cursor:default;color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
       ".dsh-remote-row-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-      ".dsh-remote-error{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-radius:10px;color:var(--dsw-alias-state-error-primary,#ef4444);background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 30%,transparent);font-size:12px;line-height:16px;word-break:break-word}",
+            ".dsh-remote-filter{display:flex;flex:none;width:100%}",
+      ".dsh-remote-filter-input{width:100%;height:30px;box-sizing:border-box;padding:0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-1,#1c1d21);color:var(--dsw-alias-label-primary,#e6e6e6);font-size:13px;line-height:18px;outline:none}",
+      ".dsh-remote-filter-input::placeholder{color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
+      ".dsh-remote-filter-input:focus{border-color:var(--dsw-alias-state-business-primary,#3b82f6)}",
+      ".dsh-remote-filter-input:disabled{opacity:.6}",
+".dsh-remote-error{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border-radius:10px;color:var(--dsw-alias-state-error-primary,#ef4444);background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary,#ef4444) 30%,transparent);font-size:12px;line-height:16px;word-break:break-word}",
       ".dsh-remote-actions{display:flex;justify-content:flex-end;gap:8px}",
       ".dsh-flow{display:flex;flex-direction:column;gap:10px;min-height:0}",
       ".dsh-tabs{display:flex;gap:4px;flex:none}",
@@ -1996,6 +2005,12 @@ window.__ModuleLoader__.load({
       var adopting = adoptingState[0];
       var setAdopting = adoptingState[1];
       var autoBrowseRef = React.useRef(false);
+      // Type-ahead filter over the current directory. Cleared on every navigation
+      // so the next folder always opens with its full listing.
+      var filterState = React.useState('');
+      var filter = filterState[0];
+      var setFilter = filterState[1];
+      var filterRef = React.useRef(null);
 
       // Unified call into the injected remote method: a synchronous throw or a
       // returned promise both converge to a promise.
@@ -2074,6 +2089,7 @@ window.__ModuleLoader__.load({
         var gen = props.generationRef.current;
         setLoading(true);
         setError(null);
+        setFilter('');
         call('listRemoteDir', host, path).then(function (response) {
           if (gen !== props.generationRef.current) return;
           setLoading(false);
@@ -2183,6 +2199,36 @@ window.__ModuleLoader__.load({
         });
       }
 
+      // Case-insensitive substring filter, directories first, prefix matches before
+      // later-in-the-name matches, then alphabetical — the stock host order minus the
+      // rows that do not match what the user typed.
+      function filterEntries(list, query) {
+        var q = String(query || '').trim().toLowerCase();
+        if (!q) return list;
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+          if (String(list[i].name).toLowerCase().indexOf(q) !== -1) out.push(list[i]);
+        }
+        out.sort(function (a, b) {
+          var ad = a.type === 'dir' ? 0 : 1;
+          var bd = b.type === 'dir' ? 0 : 1;
+          if (ad !== bd) return ad - bd;
+          var ap = String(a.name).toLowerCase().indexOf(q) === 0 ? 0 : 1;
+          var bp = String(b.name).toLowerCase().indexOf(q) === 0 ? 0 : 1;
+          if (ap !== bp) return ap - bp;
+          var an = String(a.name).toLowerCase();
+          var bn = String(b.name).toLowerCase();
+          return an < bn ? -1 : an > bn ? 1 : 0;
+        });
+        return out;
+      }
+      // Focus the filter when a directory is shown so the user can type the first
+      // letters immediately (the dialog opened from a click; nothing else needs focus).
+      React.useEffect(function () {
+        if (phase !== 'browse' || loading || adopting) return;
+        if (filterRef.current && typeof filterRef.current.focus === 'function') filterRef.current.focus();
+      }, [phase, cwd, loading]);
+
       var body = null;
       if (phase === 'hosts' || phase === 'empty' || phase === 'error') {
         var options = hosts.map(function (h) {
@@ -2223,11 +2269,16 @@ window.__ModuleLoader__.load({
           )
         );
       } else if (phase === 'browse') {
+        var visible = filterEntries(entries, filter);
         var rows;
-        if (entries.length === 0) {
-          rows = React.createElement('div', { className: 'dsh-remote-empty' }, t('emptyDir'));
+        if (visible.length === 0) {
+          // Keep the fixed-height list box even when nothing matches, so the dialog
+          // does not resize as the filter narrows.
+          rows = React.createElement('div', { className: 'dsh-remote-list' },
+            React.createElement('div', { className: 'dsh-remote-empty' },
+              filter.trim() ? t('filterNone', { query: filter.trim() }) : t('emptyDir')));
         } else {
-          rows = React.createElement('div', { className: 'dsh-remote-list' }, entries.map(function (entry) {
+          rows = React.createElement('div', { className: 'dsh-remote-list' }, visible.map(function (entry) {
             var isDir = entry.type === 'dir';
             var inner = isDir
               ? React.createElement(React.Fragment, null,
@@ -2277,12 +2328,40 @@ window.__ModuleLoader__.load({
           onRetry: retry,
           retryLabel: t('retry')
         }) : null;
+        // Type-ahead: typing the first letters narrows the current directory; Enter
+        // opens the first matching folder. The input is disabled while a listing or
+        // adopt is in flight so keystrokes never race a navigation.
+        var filterInput = React.createElement('div', { className: 'dsh-remote-filter' },
+          React.createElement('input', {
+            ref: filterRef,
+            type: 'text',
+            value: filter,
+            className: 'dsh-remote-filter-input',
+            placeholder: t('filterPh'),
+            autoComplete: 'off',
+            autoCorrect: 'off',
+            spellCheck: false,
+            disabled: loading || adopting,
+            onChange: function (event) { setFilter(event.target.value); },
+            onKeyDown: function (event) {
+              if (event.key !== 'Enter' || filter.trim() === '') return;
+              var target = null;
+              for (var fi = 0; fi < visible.length; fi++) {
+                if (visible[fi].type === 'dir') { target = visible[fi]; break; }
+              }
+              if (target === null) return;
+              event.preventDefault();
+              enterDir(target);
+            }
+          })
+        );
         body = React.createElement('div', { className: 'dsh-remote-browse' },
           pathBar,
           // Capability hint: a small line during directory browsing (falls back to
           // hostId when the host title is missing); reuses the .dsh-remote-hint style
           // (--dsw-alias-label-tertiary).
           React.createElement('div', { className: 'dsh-remote-hint' }, t('capHint', { host: curHostTitle || hostId })),
+          filterInput,
           rows,
           loading ? React.createElement('div', { className: 'dsh-remote-hint' }, t('loading')) : null,
           errorNode,
