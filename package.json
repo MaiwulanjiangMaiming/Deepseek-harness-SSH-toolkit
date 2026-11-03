@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-toolkit",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "SSH remote workspaces for DeepSeek Harness — run sessions on a remote machine.",
   "type": "module",
   "engines": {

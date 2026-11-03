@@ -3291,10 +3291,17 @@ window.__ModuleLoader__.load({
           listDirectory: function (path, signal) { return ctx.uiWorkspace.listDirectory(path, signal); },
           createDirectory: function (path, name) { return ctx.uiWorkspace.createDirectory(path, name); },
           // Native fallback: when the host has no browse capability, pop the system
-          // dialog via the official native picker (ctx.uiWorkspace.pickDirectory, the
-          // same path the official native picker uses,
-          // dsh-client-ui-directory-picker-native/lib/client.js:64).
-          pickDirectory: function () { return ctx.uiWorkspace.pickDirectory(); },
+          // dialog. On the desktop build the preload exposes the Electron dialog over
+          // IPC (`__DSH_DIRECTORY_PICKER__.pick()`) and that is what the stock native
+          // picker uses (dsh-client-ui-directory-picker-native/lib/client.js:64-65).
+          // ctx.uiWorkspace.pickDirectory falls through to the host backend, which on
+          // macOS spawns osascript/JXA just to show NSOpenPanel — seconds of delay for
+          // a dialog Electron can open directly. Prefer the IPC bridge when present.
+          pickDirectory: function () {
+            var desktop = typeof globalThis !== 'undefined' ? globalThis.__DSH_DIRECTORY_PICKER__ : undefined;
+            if (desktop && typeof desktop.pick === 'function') return desktop.pick();
+            return ctx.uiWorkspace.pickDirectory();
+          },
           t: ctx.locale.bind("workspace.ssh"),
         };
       };

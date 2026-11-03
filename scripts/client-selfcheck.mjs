@@ -71,6 +71,12 @@ assert.ok(code.includes('function LocalFlowBody'), 'client.js must define the lo
 assert.ok(code.includes('function RemoteFlowBody'), 'client.js must define the remote-tab flow body');
 assert.ok(code.includes('ctx.uiWorkspace.listDirectory'), 'client.js must inject uiWorkspace.listDirectory for the local tab');
 assert.ok(code.includes('ctx.uiWorkspace.createDirectory'), 'client.js must inject uiWorkspace.createDirectory for the local tab');
+// Desktop builds expose the native dialog over Electron IPC; the host backend spawns
+// osascript/JXA on macOS. The stock native picker prefers the bridge, ours must too.
+assert.ok(
+  code.includes('globalThis.__DSH_DIRECTORY_PICKER__'),
+  'pickDirectory must prefer the desktop IPC directory picker when the preload exposes it',
+);
 // Regression guard: 0.2.1-rc.5's `workspaces` service is the WorkspaceController
 // (list/archive/pin only). Directory browse lives on `uiWorkspace`; calling the
 // old seam at runtime throws "ctx.workspaces.listDirectory is not a function".
