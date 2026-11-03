@@ -885,7 +885,8 @@ export class SshPool {
         if (index >= 0) this.waiters.splice(index, 1);
         resolve(false);
       }, this.capacityWaitMs);
-      if (typeof timer.unref === 'function') timer.unref();
+      // Deliberately referenced: Node's test runner cancels a pending promise once
+      // the event loop has nothing left (ERR_TEST_FAILURE cancelledByParent).
       this.waiters.push(waiter);
     });
   }
