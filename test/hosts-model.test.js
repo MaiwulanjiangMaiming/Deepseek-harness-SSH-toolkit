@@ -215,3 +215,26 @@ test('proxyJump: merge keeps it and validation rejects self-reference', () => {
   assert.equal(withCommand.proxyCommand, 'nc %h %p');
   assert.equal(mergeHostPatch(withCommand, { name: 'b' }, 'h1').proxyCommand, 'nc %h %p');
 });
+
+test('mergeHostPatch: explicit empty proxyJump/proxyCommand clear the stored values', () => {
+  const stored = {
+    id: 'h1', name: 'box', host: 'h', port: 22, user: 'u',
+    auth: { type: 'key' }, proxyJump: 'jump-1', proxyCommand: 'ssh -W %h:%p bastion',
+  };
+  const cleared = mergeHostPatch(stored, {
+    id: 'h1', name: 'box', host: 'h', port: 22, user: 'u',
+    auth: { type: 'key' }, proxyJump: '', proxyCommand: '   ', // trimmed to empty
+  }, 'h1');
+  assert.equal(Object.prototype.hasOwnProperty.call(cleared, 'proxyJump'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(cleared, 'proxyCommand'), false);
+  // Omitted keys still mean "keep the stored value" (partial patches).
+  const kept = mergeHostPatch(stored, { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' } }, 'h1');
+  assert.equal(kept.proxyJump, 'jump-1');
+  assert.equal(kept.proxyCommand, 'ssh -W %h:%p bastion');
+});
+
+test('mergeHostPatch: a jump host can be replaced, not only removed', () => {
+  const stored = { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'old-jump' };
+  const next = mergeHostPatch(stored, { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'new-jump' }, 'h1');
+  assert.equal(next.proxyJump, 'new-jump');
+});

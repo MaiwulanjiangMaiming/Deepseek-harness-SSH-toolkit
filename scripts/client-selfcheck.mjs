@@ -81,6 +81,17 @@ assert.ok(
 assert.ok(code.includes('ctx.slots.inject("conversation.hero.workspace.directoryFlow"'), 'nested slots.inject pattern expected for hero hole');
 assert.ok(code.includes('ctx.slots.inject("sidebar.workspaces.directoryFlow"'), 'nested slots.inject pattern expected for sidebar hole');
 assert.ok(code.includes('ctx.locale.register("workspace.ssh"'), 'workspace.ssh locale must be registered');
+// Jump host / ProxyCommand must be sent even when empty: the host merge reads an
+// explicit '' as "clear", while a missing key keeps the stored value. Omitting
+// them (the old buildHostConfig) made a saved jump host impossible to remove.
+assert.ok(
+  code.includes("cfg.proxyJump = String(form.proxyJump != null ? form.proxyJump : '').trim()"),
+  'buildHostConfig must send proxyJump explicitly (empty clears the stored jump host)',
+);
+assert.ok(
+  code.includes("cfg.proxyCommand = String(form.proxyCommand != null ? form.proxyCommand : '').trim()"),
+  'buildHostConfig must send proxyCommand explicitly (empty clears the stored command)',
+);
 
 console.log('client.js static self-check OK');
 console.log('  id =', loaded.id);

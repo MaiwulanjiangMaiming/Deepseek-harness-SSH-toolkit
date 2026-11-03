@@ -709,3 +709,21 @@ test('checkUpdate degrades to unreachable without throwing', async () => {
   assert.equal(result.updateAvailable, false);
   ctx.dispose?.();
 });
+
+test('saveHost clears a stored jump host / ProxyCommand when the form sends them empty', async () => {
+  const table = makeHostsTable({
+    h1: {
+      id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' },
+      proxyJump: 'jump-1', proxyCommand: 'ssh -W %h:%p bastion',
+    },
+  });
+  const { ctx, svc } = makeService({}, table);
+  await svc.saveHost('h1', {
+    id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' },
+    proxyJump: '', proxyCommand: '',
+  }, 0);
+  const saved = table.get('h1');
+  assert.equal('proxyJump' in saved, false);
+  assert.equal('proxyCommand' in saved, false);
+  ctx.dispose?.();
+});

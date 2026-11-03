@@ -389,8 +389,12 @@ window.__ModuleLoader__.load({
         auth: auth,
       };
       if (form && form.knownHostsPath != null && String(form.knownHostsPath).trim()) cfg.knownHostsPath = String(form.knownHostsPath).trim();
-      if (form && form.proxyJump) cfg.proxyJump = String(form.proxyJump);
-      if (form && form.proxyCommand != null && String(form.proxyCommand).trim()) cfg.proxyCommand = String(form.proxyCommand).trim();
+      // proxyJump / proxyCommand are sent even when empty: mergeHostPatch reads an
+      // explicit '' as "clear this field", while a missing key means "keep the stored
+      // value" (partial patches). Omitting them here made clearing a jump host
+      // impossible — save silently kept the old one.
+      if (form) cfg.proxyJump = String(form.proxyJump != null ? form.proxyJump : '').trim();
+      if (form) cfg.proxyCommand = String(form.proxyCommand != null ? form.proxyCommand : '').trim();
       if (form && form.connectTimeoutMs) cfg.connectTimeoutMs = Number(form.connectTimeoutMs);
       return cfg;
     }
