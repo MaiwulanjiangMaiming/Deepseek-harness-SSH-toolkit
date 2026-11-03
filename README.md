@@ -30,7 +30,9 @@ An independent, DSH 0.2-native continuation of
 
 | | |
 |---|---|
-| **Host manager** | Add, edit, test, remove hosts from Settings → SSH Connections, including an optional jump host. Password is write-only in the UI. |
+| **Host manager** | Add, edit, test (through the jump chain), remove hosts from Settings → SSH Connections, including an optional jump host. Password is write-only in the UI. |
+| **Workspace identity** | Remote workspace rows carry an online/offline dot, a server icon and the host as a tag; the directory picker filters as you type and keeps a fixed width. |
+| **Update check** | Settings → SSH shows the installed version and flags a newer repository tag with a Release link (checked at most once per 6 hours). |
 | **Jump hosts** | Chain hops through `ProxyJump` host references (cycle-checked), or run an OpenSSH-style `ProxyCommand` locally; the terminal follows the same chain with `ssh -J` / `-o ProxyCommand`. |
 | **Config import** | Scans `~/.ssh/config` (+ `config.d`, `Include`) and imports in bulk; entries without a `User` are flagged instead of silently broken. |
 | **Seven routed tools** | `bash`, `read`, `write`, `edit`, `read_image`, `glob`, `grep` — same schemas, executed over SSH. |
@@ -76,6 +78,11 @@ Settings → SSH Connections.
 The plugin is additive: local workspaces behave exactly as before, and removing
 it (`dsh plugin --profile desktop remove dsh-ssh-toolkit`) leaves DSH untouched.
 
+Updates are manual: DSH only offers its own Update button to official plugins, so
+pull/reinstall the package and fully restart. Settings → SSH shows the installed
+version and turns the footer into "Update available: vX.Y.Z" when a newer tag
+exists on the repository (checked at most once per 6 hours).
+
 ## Quick start
 
 1. Settings → SSH Connections → **Import from ~/.ssh/config** (or **Add host**).
@@ -98,7 +105,7 @@ src/workspace/        router.js (placeholder paths), placeholder.js
 src/jobs.js           remote background jobs
 src/policy.js         sandbox fence
 src/compat/           UI bridge: remote Files sidebar + terminal
-test/                 307 unit tests (node:test)
+test/                 338 unit tests (node:test)
 ```
 
 Hosts are stored as records in the `dsh_ssh_hosts` storage domain

@@ -287,8 +287,15 @@ function installWorkspaceFiles(service, pool, scope) {
     let last = await withConn(pool, target.hostId, async (conn) => (await conn.fs()).stat(target.remotePath)).catch(() => undefined);
     while (!signal?.aborted) {
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 3000);
-        signal?.addEventListener?.('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+        // Remove the abort listener when the timer wins, or a long-open Files panel
+        // accumulates one listener per 3s tick on the same signal.
+        const onAbort = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener?.('abort', onAbort);
+          resolve();
+        }, 3000);
+        signal?.addEventListener?.('abort', onAbort, { once: true });
+        if (signal?.aborted) onAbort();
       });
       if (signal?.aborted) return;
       const next = await withConn(pool, target.hostId, async (conn) => (await conn.fs()).stat(target.remotePath)).catch(() => undefined);

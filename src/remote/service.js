@@ -130,11 +130,11 @@ export function latestVersionTag(tags) {
   return best;
 }
 
-// Reachability cache for the sidebar dots. The client polls every 20s and this
-// window is deliberately longer than one poll: an idle sidebar then dials each
-// host about once a minute instead of every tick, and a slow/offline host is
-// never redialed while its last result is still fresh.
-const PRESENCE_TTL_MS = 45_000;
+// Reachability cache for the sidebar dots. The client polls every 20s (and only
+// while the sidebar is actually visible); this window is deliberately several
+// polls long, so a visible sidebar dials each host at most about twice a minute
+// and an offline host is never redialed while its last result is fresh.
+const PRESENCE_TTL_MS = 90_000;
 
 export class SshRemoteService extends Service {
   constructor(ctx, sshPool) {
@@ -152,12 +152,13 @@ export class SshRemoteService extends Service {
     // de-duplicated so overlapping polls never open parallel connections.
     this.presenceCache = new Map(); // hostId → { at, status }
     this.presenceInflight = new Map(); // hostId → Promise<'online' | 'offline'>
-    this.titlesMigrated = false; // one legacy auto-title pass per process (first presence poll)
+    this.titleMigration = null; // in-flight legacy title pass (retried until clean)
     // Update check state: one GitHub tags read per TTL (shorter after a failure),
     // and an injectable fetch so tests never touch the network.
     this.version = PLUGIN_VERSION;
     this.updateResult = null;
     this.updateCheckedAt = 0;
+    this.updateInflight = null;
     this.fetchImpl = (...args) => fetch(...args);
   }
 
@@ -408,8 +409,9 @@ export class SshRemoteService extends Service {
    * <DSH_SSH_REMOTE_ROOT | $DSH_HOME || ~/.dsh>/remote), fs.mkdir recursive creates the
    * real directory; idempotent when it already exists. @returns { localPath, hostId, remotePath }.
    *
-   * The placeholder workspace record's title is written as host display name / basename
-   * (e.g. ubuntu / my-project) so the sidebar can distinguish hosts. The official
+   * The placeholder workspace record's title is the bare remote basename (e.g.
+   * my-project); the sidebar renders the host as a separate chip from
+   * ssh/workspacePresence metadata. The official
    * workspace.create wire only accepts { path } (dsh-host-apiproxy
    * workspaceCreateRequestSchema) and defaults the title to the directory basename, which
    * for a placeholder is the base64-encoded segment (unreadable, e.g. L2hvbWUv...; the actual
@@ -418,8 +420,8 @@ export class SshRemoteService extends Service {
    * required to be unique, matching the local same-name convention). When the official flow
    * later adopts the same path, resolveByPath hits the existing record (created:false) and
    * the title is preserved. Old-signature titles are upgraded idempotently: ① base64-encoded
-   * segment, ② bare basename (no host marker); anything else (user-edited or already the new
-   * format) is left alone. Because localPath is built by this plugin's mapRemoteToLocal, the
+   * segment, ② "basename · host", ③ "host / basename"; anything else (user-edited or
+   * already the new format) is left alone. Because localPath is built by this plugin's mapRemoteToLocal, the
    * upgrade only touches placeholder workspace records, never ordinary local workspaces. When
    * the registry is unavailable, fall back to the old behavior (no record write).
    */
@@ -482,12 +484,14 @@ export class SshRemoteService extends Service {
     } catch {
       return { states: [] };
     }
-    // One-time upgrade of the old auto titles (host baked into the name) to the
-    // bare basename; the chip now carries the host. Fire-and-forget: this poll
-    // still reports the old titles, the next one shows the migrated names.
-    if (!this.titlesMigrated) {
-      this.titlesMigrated = true;
-      this.migratePlaceholderTitles(entities).catch(() => {});
+    // Upgrade the old auto titles (host baked into the name) to the bare basename;
+    // the chip now carries the host. Retried on later polls while any legacy title
+    // remains, so a first poll that races the stored-host resolver is not fatal.
+    // In-flight de-dupe keeps writes from overlapping.
+    if (this.titleMigration === null) {
+      this.titleMigration = this.migratePlaceholderTitles(entities)
+        .catch(() => 0)
+        .finally(() => { this.titleMigration = null; });
     }
     const states = [];
     for (const entity of Array.isArray(entities) ? entities : []) {
@@ -574,6 +578,19 @@ export class SshRemoteService extends Service {
     const now = Date.now();
     const ttl = this.updateResult && this.updateResult.error ? UPDATE_FAILURE_TTL_MS : UPDATE_TTL_MS;
     if (!force && this.updateResult !== null && now - this.updateCheckedAt < ttl) return this.updateResult;
+    // Two Settings surfaces (or a retry racing the first probe) share one request.
+    if (this.updateInflight !== null) return this.updateInflight;
+    const run = this.runUpdateCheck(now);
+    this.updateInflight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.updateInflight === run) this.updateInflight = null;
+    }
+  }
+
+  /** One GitHub tags read; split out so checkUpdate can de-duplicate concurrent calls. */
+  async runUpdateCheck(now) {
     let result;
     try {
       const response = await this.fetchImpl(UPDATE_TAGS_URL, {

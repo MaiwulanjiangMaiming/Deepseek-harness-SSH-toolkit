@@ -150,29 +150,63 @@ export function createRemoteBashJobHooks({ conn, cmd, cwd, hostId, jobDir, pollM
     }
   }
 
-  async function readLogFile() {
+  // The job log grows while it is polled; reading it whole every tick is O(n²)
+  // traffic for a chatty job. Track the remote size and append only new bytes,
+  // keeping a bounded tail (older lines were already returned to the UI).
+  const MAX_LOG_BYTES = 4 * 1024 * 1024;
+  let logSize = 0;
+  let logRefresh = null;
+  function refreshLogBuffer() {
+    // The done loop and the _refresh test hook can race; share one read or the
+    // same bytes are appended twice.
+    if (logRefresh !== null) return logRefresh;
+    logRefresh = readLogDelta().finally(() => { logRefresh = null; });
+    return logRefresh;
+  }
+  async function readLogDelta() {
     try {
       const fs = await conn.fs();
-      const bytes = await fs.readBytes(logPath);
-      return bytes.toString('utf8');
+      if (typeof fs.stat !== 'function') {
+        // Older/alternate fs adapters: keep the whole-file behavior.
+        const bytes = await fs.readBytes(logPath);
+        buffered = bytes.toString('utf8');
+        if (cursor > buffered.length) cursor = buffered.length;
+        logSize = buffered.length;
+        return;
+      }
+      const info = await fs.stat(logPath);
+      const size = info && typeof info.size === 'number' ? info.size : 0;
+      if (size === logSize) return;
+      if (size < logSize) { // truncated/rotated: start over
+        logSize = 0;
+        buffered = '';
+        cursor = 0;
+      }
+      let start = logSize;
+      if (size - start > MAX_LOG_BYTES) {
+        start = size - MAX_LOG_BYTES; // huge burst: keep only the fresh tail
+        buffered = '';
+        cursor = 0;
+      }
+      const bytes = await fs.readBytes(logPath, { offset: start });
+      buffered += bytes.toString('utf8');
+      if (buffered.length > MAX_LOG_BYTES) {
+        const drop = buffered.length - MAX_LOG_BYTES;
+        buffered = buffered.slice(drop);
+        cursor = Math.max(0, cursor - drop);
+      }
+      logSize = start + bytes.length;
     } catch {
-      return '';
+      /* pull failed (file not ready/deleted): keep the previous buffer */
     }
   }
 
   // ── Synchronous readOutput local buffer ─────────────────────────────────
   // The official registry.read() does not await readOutput(); job_output's text
   // must be a string. So readOutput synchronously slices the buffered cursor delta;
-  // buffered is filled asynchronously by refreshLog() (from the done loop and test hooks).
+  // buffered is filled asynchronously by refreshLogBuffer() (from the done loop and test hooks).
   let buffered = '';
   let cursor = 0;
-  async function refreshLog() {
-    try {
-      buffered = await readLogFile();
-    } catch {
-      /* pull failed (file not ready/deleted): keep the previous buffer */
-    }
-  }
   // readOutput synchronously returns the buffered text added since the last read (cursor advances by chars).
   const readOutput = () => {
     const delta = buffered.slice(cursor);
@@ -184,9 +218,9 @@ export function createRemoteBashJobHooks({ conn, cmd, cwd, hostId, jobDir, pollM
   // command; cancelled → killed.
   const done = (async () => {
     await spawned; // startup failure throws here → the registry records the job as failed
-    await refreshLog(); // first pull of the initial log
+    await refreshLogBuffer(); // first pull of the initial log
     for (;;) {
-      await refreshLog(); // refresh the local log buffer on every status/alive probe round
+      await refreshLogBuffer(); // refresh the local log buffer on every status/alive probe round
       const alive = await isAlive();
       let status = null;
       if (state.cancelled) {
@@ -203,7 +237,7 @@ export function createRemoteBashJobHooks({ conn, cmd, cwd, hostId, jobDir, pollM
         }
       }
       if (status !== null) {
-        await refreshLog(); // final sync before terminating (grab the full output)
+        await refreshLogBuffer(); // final sync before terminating (grab the full output)
         // Best-effort cleanup of log/status files (job is done); failures are silent.
         const fs = await conn.fs().catch(() => null);
         if (fs) {
@@ -233,7 +267,7 @@ export function createRemoteBashJobHooks({ conn, cmd, cwd, hostId, jobDir, pollM
     ['_meta', { jobDirText: jobDir, logPath, statusPath }],
     ['_state', state],
     ['_spawned', spawned],
-    ['_refresh', refreshLog],
+    ['_refresh', refreshLogBuffer],
   ]) {
     Object.defineProperty(hooks, key, { value, enumerable: false, configurable: true });
   }

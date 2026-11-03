@@ -194,14 +194,22 @@ export function validateHostConfig(host) {
   if (!host || typeof host !== 'object') return { ok: false, errors: { host: 'not-an-object' } };
   const errors = {};
   if (!String(host.id ?? '')) errors.id = 'required';
+  const CONTROL = /[\u0000-\u001f\u007f]/;
   const name = String(host.name ?? '').trim();
   if (!name) errors.name = 'required';
+  else if (CONTROL.test(name)) errors.name = 'controlChars';
   const hostPart = String(host.host ?? '').trim();
   if (!hostPart) errors.host = 'required';
+  else if (CONTROL.test(hostPart)) errors.host = 'controlChars'; // newline would inject a known_hosts line
   else if (hostPart.includes(' ')) errors.host = 'noSpaces';
   if (normalizePort(host.port) === null) errors.port = 'range';
   const user = String(host.user ?? '').trim();
   if (!user) errors.user = 'required';
+  else if (CONTROL.test(user)) errors.user = 'controlChars';
+  if (host.knownHostsPath !== undefined) {
+    const known = String(host.knownHostsPath);
+    if (known && CONTROL.test(known)) errors.knownHostsPath = 'controlChars';
+  }
   const auth = host.auth && typeof host.auth === 'object' ? host.auth : {};
   if (auth.type !== 'key' && auth.type !== 'password') errors.auth = 'type';
   if (host.proxyJump !== undefined) {
@@ -286,6 +294,15 @@ export function mergeTestConfig(cfg, stored) {
   if (!c.knownHostsPath && s?.knownHostsPath) merged.knownHostsPath = s.knownHostsPath;
   if (c.connectTimeoutMs === undefined && s?.connectTimeoutMs !== undefined) merged.connectTimeoutMs = s.connectTimeoutMs;
   if (c.keepaliveIntervalMs === undefined && s?.keepaliveIntervalMs !== undefined) merged.keepaliveIntervalMs = s.keepaliveIntervalMs;
+  // Test the topology the form shows, not just the direct target: ProxyJump and
+  // ProxyCommand have to travel with the test config or "Test connection" dials
+  // the target directly and fails for hosts reachable only through the chain.
+  // An explicit '' from the form means "no jump"; an omitted key falls back to
+  // the stored value (older clients send only the changed fields).
+  const proxyJump = c.proxyJump !== undefined ? String(c.proxyJump).trim() : String(s?.proxyJump ?? '').trim();
+  if (proxyJump) merged.proxyJump = proxyJump;
+  const proxyCommand = c.proxyCommand !== undefined ? String(c.proxyCommand).trim() : String(s?.proxyCommand ?? '').trim();
+  if (proxyCommand) merged.proxyCommand = proxyCommand;
   return merged;
 }
 

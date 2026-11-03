@@ -347,3 +347,51 @@ test('pool evicts on failed acquire and refuses after dispose', async () => {
   await pool.dispose();
   await assert.rejects(pool.acquire(bad), (e) => e instanceof SshError && e.stage === 'pool-disposed');
 });
+
+test('pool evicts an idle connection at capacity instead of hanging forever', async () => {
+  const pool = new SshPool({ maxConnections: 1, capacityWaitMs: 10 });
+  let disposed = false;
+  const idle = { id: 'a', busy: 0, lastUsed: Date.now() - 60_000, dispose: async () => { disposed = true; } };
+  pool.conns.set('a', idle);
+  await pool._ensureCapacity({ id: 'b' });
+  assert.equal(pool.conns.size, 0);
+  assert.equal(disposed, true);
+
+  // A connection that is executing is never evicted; the acquire fails clearly.
+  const busy = { id: 'a', busy: 1, lastUsed: 0, dispose: async () => {} };
+  pool.conns.set('a', busy);
+  await assert.rejects(pool._ensureCapacity({ id: 'b' }), (e) => e instanceof SshError && e.stage === 'pool-capacity');
+  assert.equal(pool.conns.size, 1);
+  await pool.dispose();
+});
+
+test('pool idle eviction ignores recently used connections', () => {
+  const pool = new SshPool({ maxConnections: 2, idleEvictMs: 2_000 });
+  const fresh = { id: 'a', busy: 0, lastUsed: Date.now() };
+  const stale = { id: 'b', busy: 0, lastUsed: Date.now() - 60_000 };
+  pool.conns.set('a', fresh);
+  pool.conns.set('b', stale);
+  assert.equal(pool._idleVictim(Date.now()), stale);
+  fresh.lastUsed = Date.now() - 120_000;
+  assert.equal(pool._idleVictim(Date.now()), fresh);
+});
+
+test('SftpWrapper.readBytes reads from offset with a length bound', async () => {
+  const data = Buffer.from('0123456789abcdef');
+  const positions = [];
+  const fakeRaw = {
+    stat: (p, cb) => cb(null, { size: data.length }),
+    open: (p, f, a, cb) => { if (typeof a === 'function') cb = a; cb(null, Buffer.from('h')); },
+    read: (h, b, o, len, position, cb) => {
+      positions.push([position, len]);
+      const n = Math.max(0, Math.min(len, data.length - position));
+      data.copy(b, o, position, position + n);
+      cb(null, n);
+    },
+    close: (h, cb) => cb(null),
+  };
+  const wrapper = new SftpWrapper({ hostId: 'h' }, fakeRaw);
+  const out = await wrapper.readBytes('/x', { offset: 4, length: 6, chunk: 4, pipeline: 1 });
+  assert.equal(out.toString('utf8'), '456789');
+  assert.deepEqual(positions, [[4, 4], [8, 2]]);
+});

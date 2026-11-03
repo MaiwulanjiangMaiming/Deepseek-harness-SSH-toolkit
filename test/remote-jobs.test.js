@@ -21,7 +21,16 @@ function makeFakeConn({ pid = 4242, spawnStdout = pid + '\n', aliveCount = Infin
   const setFile = (p, v) => files.set(p, Buffer.from(v, 'utf8'));
   const sftp = {
     _files: files,
-    async readBytes(p) { const b = files.get(p); if (b === undefined) throw new Error('ENOENT ' + p); return b; },
+    async readBytes(p, opts = {}) {
+      const b = files.get(p);
+      if (b === undefined) throw new Error('ENOENT ' + p);
+      return b.subarray(opts.offset || 0);
+    },
+    async stat(p) {
+      const b = files.get(p);
+      if (b === undefined) throw new Error('ENOENT ' + p);
+      return { type: 'file', size: b.length, mtime: 0 };
+    },
     async unlink(p) { files.delete(p); },
   };
   const conn = {
@@ -251,4 +260,19 @@ test('createRemoteBashJobHooks: process exits without writing status (ec=null) -
   assert.equal(outcome.status, 'failed');
   assert.match(outcome.detail, /before reporting an exit status/);
   assert.equal(conn._sftp._files.size, 0); // no leftover
+});
+
+test('job output refresh appends only new bytes', async () => {
+  const conn = makeFakeConn({ aliveCount: 1 });
+  const hooks = createRemoteBashJobHooks({ conn, cmd: 'echo hi', cwd: '/tmp/w', hostId: 'u1', jobDir: '/tmp/dsh-ssh-jobs-u1', pollMs: 50 });
+  await hooks._spawned;
+  conn.setFile(hooks._meta.logPath, 'one\n');
+  await hooks._refresh();
+  assert.equal(hooks.readOutput(), 'one\n');
+  conn.setFile(hooks._meta.logPath, 'one\ntwo\n');
+  await hooks._refresh();
+  // Only the appended line is new; the first line is not re-delivered.
+  assert.equal(hooks.readOutput(), 'two\n');
+  conn.setFile(hooks._meta.statusPath, '0');
+  await hooks.done;
 });

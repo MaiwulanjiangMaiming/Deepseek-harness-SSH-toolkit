@@ -1043,7 +1043,7 @@ window.__ModuleLoader__.load({
       ".tk-version-link{padding:0;border:0;background:none;color:var(--dsw-alias-link,#4e9bff);font:inherit;cursor:pointer;text-decoration:underline}",
       ".tk-version-link:hover{color:var(--dsw-alias-link-hover,#6cb0ff)}",
       ".tk-version-ok{color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
-      ".dsh-remote-dialog{width:min(520px,100%);box-sizing:border-box;overflow:hidden}",
+      ".dsh-remote-dialog{width:min(520px,100%);box-sizing:border-box;overflow-x:hidden}",
       ".dsh-remote-pick,.dsh-remote-browse{display:flex;flex-direction:column;gap:10px;min-height:220px}",
       ".dsh-remote-label{font-size:11px;line-height:14px;color:var(--dsw-alias-label-tertiary,#9a9a9a)}",
       ".dsh-remote-empty{display:flex;align-items:center;justify-content:center;min-height:140px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:12px;color:var(--dsw-alias-label-tertiary,#9a9a9a);font-size:13px;text-align:center}",
@@ -1421,15 +1421,20 @@ window.__ModuleLoader__.load({
       var updateState = React.useState(null);
       var update = updateState[0];
       var setUpdate = updateState[1];
+      // Retry when the remote becomes ready: the first mount may run before the
+      // child-fiber inject lands, and a silent rejection would leave the footer
+      // without a version for the whole session.
       React.useEffect(function () {
+        if (update !== null) return;
+        if (state.status === 'error' || state.status === 'unavailable') return;
         var alive = true;
         Promise.resolve().then(function () { return props.checkUpdate(); }).then(function (response) {
           if (!alive) return;
           var value = unwrapRemoteResponse(response);
           if (value && typeof value === 'object' && typeof value.current === 'string') setUpdate(value);
-        }, function () { /* remote not mounted: nothing to show */ });
+        }, function () { /* not ready yet; a status change retries */ });
         return function () { alive = false; };
-      }, []);
+      }, [state.status, update]);
 
       var hosts = sortedHosts(state.hosts);
       var detected = state.detected || [];
@@ -1616,10 +1621,12 @@ window.__ModuleLoader__.load({
               type: "button",
               className: "tk-version-link",
               onClick: function () {
-                try { window.open(update.url, "_blank", "noopener,noreferrer"); } catch (e) {}
+                var url = update && typeof update.url === "string" ? update.url : "";
+                if (!url) return;
+                try { window.open(url, "_blank", "noopener,noreferrer"); } catch (e) {}
               }
             }, t("updateAvailable", { version: update.latest }))
-          : update && !update.error && update.current
+          : update && !update.error && update.latest
             ? React.createElement("span", { className: "tk-version-ok" }, t("upToDate"))
             : null
       );
@@ -2165,6 +2172,13 @@ window.__ModuleLoader__.load({
         setPhase('browse');
         setLoading(true);
         setError(null);
+        // Never show the previous host's listing under the new host: on a resolve
+        // failure it would stay visible, and Retry / "Use this folder" would act on
+        // a path that was never listed on this host.
+        setEntries([]);
+        setCwd('');
+        setStack([]);
+        setFilter('');
         call('resolveRemoteHome', host).then(function (home) {
           if (gen !== props.generationRef.current) return;
           var hki = hostKeyInfoOf(home);
@@ -2198,7 +2212,7 @@ window.__ModuleLoader__.load({
         startBrowse(id);
       }
       function enterDir(entry) {
-        if (!entry || entry.type !== 'dir' || loading || adopting) return;
+        if (!entry || entry.type !== 'dir' || loading || adopting || busy || !cwd) return;
         var next = stack.concat([cwd]);
         listInto(hostId, (cwd.endsWith('/') ? cwd : cwd + '/') + entry.name, next);
       }
@@ -2269,9 +2283,11 @@ window.__ModuleLoader__.load({
       // Focus the filter when a directory is shown so the user can type the first
       // letters immediately (the dialog opened from a click; nothing else needs focus).
       React.useEffect(function () {
-        if (phase !== 'browse' || loading || adopting) return;
+        // Do not steal focus to the input behind the TOFU dialog (typing would filter
+        // the obscured list and Enter could start another listing).
+        if (phase !== 'browse' || loading || adopting || trustInfo) return;
         if (filterRef.current && typeof filterRef.current.focus === 'function') filterRef.current.focus();
-      }, [phase, cwd, loading]);
+      }, [phase, cwd, loading, trustInfo]);
 
       var body = null;
       if (phase === 'hosts' || phase === 'empty' || phase === 'error') {
@@ -2333,7 +2349,7 @@ window.__ModuleLoader__.load({
               key: entry.name,
               type: isDir ? 'button' : undefined,
               className: 'dsh-remote-row' + (isDir ? '' : ' dsh-remote-row-file'),
-              disabled: isDir ? (loading || adopting) : undefined,
+              disabled: isDir ? (loading || adopting || busy) : undefined,
               onClick: isDir ? function () { enterDir(entry); } : undefined,
               title: entry.name + (entry.size !== undefined ? ' · ' + entry.size + ' B' : '')
             }, inner);
@@ -2385,7 +2401,7 @@ window.__ModuleLoader__.load({
             autoComplete: 'off',
             autoCorrect: 'off',
             spellCheck: false,
-            disabled: loading || adopting,
+            disabled: loading || adopting || busy,
             onChange: function (event) { setFilter(event.target.value); },
             onKeyDown: function (event) {
               if (event.key !== 'Enter' || filter.trim() === '') return;
@@ -2478,6 +2494,10 @@ window.__ModuleLoader__.load({
         if (open) {
           generation.current += 1;
           reported.current = false;
+          // An adopt from the previous open may still be in flight; its completion is
+          // dropped by the generation check, so clear the guard here or Cancel would
+          // stay disabled forever.
+          adoptingRef.current = false;
         }
       }
       function reportOutcome(fn, value) {
@@ -3038,20 +3058,23 @@ window.__ModuleLoader__.load({
       // "_projectRow"). Fall back to the documented child order
       // [folder, chevron, projectText, rowActions] if the suffix changes.
       function titleNode(row) {
+        // Anchored lookup first: the title is the first child of the row's
+        // projectText box. Fall back to the generic class suffix, then to the
+        // documented child order [folder, chevron, projectText, rowActions].
+        var box = null;
+        try { box = row.querySelector('[class*="_projectText"]'); } catch (err) { box = null; }
+        if (box && box.firstElementChild) return box.firstElementChild;
         var title = null;
-        try {
-          title = row.querySelector('[class*="_title"]');
-        } catch (err) {
-          title = null;
-        }
+        try { title = row.querySelector('[class*="_title"]'); } catch (err) { title = null; }
         if (title) return title;
-        var box = row.children && row.children.length > 2 ? row.children[2] : null;
-        return box && box.firstElementChild ? box.firstElementChild : null;
+        var fallback = row.children && row.children.length > 2 ? row.children[2] : null;
+        return fallback && fallback.firstElementChild ? fallback.firstElementChild : null;
       }
       function clearRow(row) {
+        // Only our paint sets this title; leave any title a future stock row owns alone.
+        if (row.hasAttribute(ATTR) || row.hasAttribute(REMOTE_ATTR)) row.removeAttribute("title");
         row.removeAttribute(ATTR);
         row.removeAttribute(REMOTE_ATTR);
-        row.removeAttribute("title");
         var title = titleNode(row);
         if (title) title.removeAttribute(HOST_ATTR);
       }
@@ -3086,17 +3109,28 @@ window.__ModuleLoader__.load({
       }
       function schedulePaint() {
         if (disposed || paintTimer !== null) return;
-        paintTimer = window.setTimeout(paint, 120);
+        if (typeof document !== "undefined" && document.hidden) return;
+        // Coalesce mutation bursts (chat streaming, tool cards) instead of querying
+        // the whole document every 120ms.
+        paintTimer = window.setTimeout(paint, 300);
+      }
+      function onVisibilityChange() {
+        if (typeof document !== "undefined" && !document.hidden) schedulePaint();
       }
       function poll() {
         if (disposed) return Promise.resolve();
+        // A poll can open real SSH connections per host. Skip it when the window is
+        // hidden or the sidebar is collapsed (no row exists to paint), and let the
+        // observer/next tick catch up once rows are visible again.
+        if (typeof document !== "undefined" && document.hidden) return Promise.resolve();
+        if (rows().length === 0) return Promise.resolve();
         var call = remoteCall("workspacePresence");
         return Promise.resolve()
           .then(function () { return call(); })
           .then(function (response) {
             var value = unwrapRemoteResponse(response);
-            var states = value && Array.isArray(value.states) ? value.states : null;
-            if (states === null) return;
+            if (value === null) return; // transport/business failure: keep the last known dots
+            var states = value && Array.isArray(value.states) ? value.states : [];
             var next = {};
             for (var i = 0; i < states.length; i++) {
               var state = states[i];
@@ -3115,12 +3149,14 @@ window.__ModuleLoader__.load({
       if (!watchRoot) return;
       var observer = new MutationObserver(schedulePaint);
       observer.observe(watchRoot, { childList: true, subtree: true });
+      if (typeof document.addEventListener === "function") document.addEventListener("visibilitychange", onVisibilityChange);
       pollTimer = window.setInterval(poll, 20000);
       poll();
       ctx.effect(function () {
         return function () {
           disposed = true;
           observer.disconnect();
+          if (typeof document.removeEventListener === "function") document.removeEventListener("visibilitychange", onVisibilityChange);
           if (pollTimer !== null) window.clearInterval(pollTimer);
           if (paintTimer !== null) window.clearTimeout(paintTimer);
           var nodes = rows();

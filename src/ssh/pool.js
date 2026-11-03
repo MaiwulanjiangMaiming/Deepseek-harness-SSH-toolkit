@@ -249,6 +249,9 @@ export class SshConn {
     this._sftpUnavailable = false; // whether SFTP probing failed on this connection (decided on first fs())
     this.verifyError = null;  // set by makeHostVerifier
     this._dead = false; // becomes true when the underlying ssh2 client emits close unexpectedly
+    this.busy = 0; // in-flight exec/execStream calls; the pool never evicts a busy connection
+    this.lastUsed = Date.now();
+    this.isJump = false; // set when another host tunnels through this connection (never evict)
     this._isClosing = false; // true while dispose() is intentionally closing the client
     // Called when the ssh2 client dies unexpectedly (keepalive failure, network drop, remote close).
     // Marks the connection as dead and clears cached state so the next connect() can rebuild.
@@ -411,18 +414,31 @@ export class SshConn {
   async _doExecChannel(cmd, opts = {}) {
     this._ensureOpen();
     const full = buildRemoteCommand(cmd, opts.cwd);
-    return new Promise((resolve, reject) => {
-      let stream;
+    const stream = await new Promise((resolve, reject) => {
+      let s;
       try {
         // ssh2 throws "Not connected" synchronously when the connection is dead — wrap in SshError
-        stream = this.client.exec(full, (err, s) => {
+        s = this.client.exec(full, (err, opened) => {
           if (err) reject(new SshError({ hostId: this.id, stage: 'exec-open', message: err.message, cause: err }));
-          else resolve(s);
+          else resolve(opened);
         });
       } catch (err) {
         reject(new SshError({ hostId: this.id, stage: 'exec-open', message: err?.message ?? String(err), cause: err }));
       }
     });
+    // Hold the connection out of the pool's eviction set until the channel closes;
+    // a long exec must never be evicted to make room for another host.
+    this.busy += 1;
+    let released = false;
+    const releaseBusy = () => {
+      if (released) return;
+      released = true;
+      this.busy = Math.max(0, this.busy - 1);
+      this.lastUsed = Date.now();
+    };
+    stream.once('close', releaseBusy);
+    stream.once('error', releaseBusy);
+    return stream;
   }
 
   async _execChannel(cmd, opts = {}) {
@@ -449,6 +465,7 @@ export class SshConn {
     const out = [];
     const errOut = [];
     let outBytes = 0;
+    let errBytes = 0;
     const settled = await new Promise((resolve, reject) => {
       let done = false;
       const finish = (fn, value) => { if (done) return; done = true; if (timer) clearTimeout(timer); fn(value); };
@@ -469,7 +486,17 @@ export class SshConn {
         }
         out.push(d);
       });
-      stream.stderr.on('data', (d) => errOut.push(d));
+      stream.stderr.on('data', (d) => {
+        // Count stderr against the same bound: a command that floods stderr would
+        // otherwise grow the host heap without limit.
+        errBytes += d.length;
+        if (opts.maxStdoutBytes !== undefined && outBytes + errBytes > opts.maxStdoutBytes) {
+          try { stream.close(); } catch { /* noop */ }
+          finish(reject, new SshError({ hostId: this.id, stage: 'exec-output-overflow', message: 'exec output exceeded ' + opts.maxStdoutBytes + ' bytes: ' + cmd }));
+          return;
+        }
+        errOut.push(d);
+      });
       stream.on('close', (c, sig) => finish(resolve, { code: c ?? -1, signal: sig ?? null }));
       stream.on('error', (e) => finish(reject, new SshError({ hostId: this.id, stage: 'exec', message: e.message, cause: e })));
     });
@@ -541,6 +568,7 @@ export class SshConn {
   // cfg.forceExecFs is a test switch that forces the exec fallback (for real no-sftp
   // simulation) without touching the remote sshd.
   async fs() {
+    this.lastUsed = Date.now();
     await this.connect();
     this._ensureOpen();
     if (this.cfg.forceExecFs || this._sftpUnavailable) return new ExecFs(this);
@@ -618,12 +646,13 @@ export class SftpWrapper {
   // Slot assembly: each request occupies a slot (in issue order) and writes only its
   // own slot; once all in-flight requests settle, slots are concatenated in slot
   // order. No new requests are issued after EOF (0 bytes).
-  readBytes(p, { pipeline = 16, chunk = 256 * 1024 } = {}) {
+  readBytes(p, { pipeline = 16, chunk = 256 * 1024, offset: startOffset = 0, length } = {}) {
     return new Promise((resolve, reject) => {
       this.sftp.open(p, 'r', (err, handle) => {
         if (err) return reject(this._wrap(err, 'sftp-read', p));
         const slots = []; // idx → { buf, n }; assembled by request slot
-        let offset = 0;   // advanced as requests are issued
+        let offset = Math.max(0, Number(startOffset) || 0); // advanced as requests are issued
+        const limit = length === undefined ? Infinity : offset + Math.max(0, Number(length) || 0);
         let pending = 0;
         let eofSeen = false;
         let done = false;
@@ -652,24 +681,29 @@ export class SftpWrapper {
           if (failed || done || eofSeen) return;
           while (pending < pipeline) {
             if (failed || done || eofSeen) break; // guards against an infinite loop under synchronous callbacks
+            if (offset >= limit) { eofSeen = true; break; }
             const idx = slots.length;
             const buf = Buffer.allocUnsafe(chunk);
             slots.push({ buf, n: 0 });
             const pos = offset;
-            offset += chunk;
+            const len = Math.min(chunk, limit - pos);
+            offset += len;
             pending++;
-            this.sftp.read(handle, buf, 0, chunk, pos, (err2, bytesRead) => {
+            this.sftp.read(handle, buf, 0, len, pos, (err2, bytesRead) => {
               pending--;
               if (failed || done) return;
               if (err2) return fail(err2);
               slots[idx].n = bytesRead;
               if (bytesRead === 0) eofSeen = true;
-              if (pending === 0) return finish(); // all in-flight settled (order-safe)
+              // Refill before deciding we are done: with pipeline=1 the old order
+              // finished after the first chunk and truncated the read.
               pump();
+              if (pending === 0 && !done) return finish();
             });
           }
         };
         pump();
+        if (eofSeen && pending === 0) finish();
       });
     });
   }
@@ -758,9 +792,18 @@ export async function defaultIdentity(home = os.homedir()) {
   return undefined;
 }
 
+// A full pool used to block forever (browse/probe acquires never call release()).
+// Instead, evict a connection that has been idle for a moment; only when every
+// connection is actively executing does the acquire wait, and then it fails with
+// a clear error rather than hanging the caller.
+const POOL_IDLE_EVICT_MS = 2_000;
+const POOL_CAPACITY_WAIT_MS = 15_000;
+
 export class SshPool {
   constructor(options = {}) {
     this.maxConnections = options.maxConnections ?? 4;
+    this.idleEvictMs = options.idleEvictMs ?? POOL_IDLE_EVICT_MS;
+    this.capacityWaitMs = options.capacityWaitMs ?? POOL_CAPACITY_WAIT_MS;
     this.conns = new Map();  // hostId -> SshConn
     this.waiters = [];
     this.disposed = false;
@@ -778,6 +821,9 @@ export class SshPool {
     const jumpCfg = this.getHost(cfg.proxyJump);
     if (!jumpCfg) throw new SshError({ hostId: cfg.id ?? '', stage: 'proxy-jump', message: 'ProxyJump host "' + cfg.proxyJump + '" is not configured' });
     const jumpConn = await this._acquire(jumpCfg, seen);
+    // A live tunnel depends on this connection; evicting it would cut the target
+    // session mid-run, so keep it out of the capacity eviction set.
+    jumpConn.isJump = true;
     return async () => {
       await jumpConn.connect(); // reconnect the jump if it dropped
       return new Promise((resolve, reject) => {
@@ -791,6 +837,77 @@ export class SshPool {
 
   async acquire(cfg) {
     return this._acquire(cfg, new Set());
+  }
+
+  /** Idle connection eligible for eviction (oldest first); never one that is executing. */
+  _idleVictim(now) {
+    let victim = null;
+    for (const conn of this.conns.values()) {
+      if (!conn || conn.busy > 0 || conn.isJump) continue;
+      if (now - (conn.lastUsed || 0) < this.idleEvictMs) continue;
+      if (victim === null || (conn.lastUsed || 0) < (victim.lastUsed || 0)) victim = conn;
+    }
+    return victim;
+  }
+
+  /** Least-recently-used connection that is not executing (last-resort eviction). */
+  _lruIdleVictim() {
+    let victim = null;
+    for (const conn of this.conns.values()) {
+      if (!conn || conn.busy > 0 || conn.isJump) continue;
+      if (victim === null || (conn.lastUsed || 0) < (victim.lastUsed || 0)) victim = conn;
+    }
+    return victim;
+  }
+
+  /** Remove a specific connection from the pool by identity and dispose it. */
+  async _evictConn(conn) {
+    for (const [key, value] of this.conns) {
+      if (value === conn) this.conns.delete(key);
+    }
+    if (conn && typeof conn.dispose === 'function') await conn.dispose().catch(() => {});
+  }
+
+  /** Wake one waiter (capacity freed) or time out; false means nothing was released. */
+  _waitForCapacity() {
+    return new Promise((resolve) => {
+      let settled = false;
+      const waiter = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        resolve(false);
+      }, this.capacityWaitMs);
+      if (typeof timer.unref === 'function') timer.unref();
+      this.waiters.push(waiter);
+    });
+  }
+
+  /** Make room for one more connection without blocking indefinitely. */
+  async _ensureCapacity(cfg) {
+    if (this.conns.size < this.maxConnections) return;
+    let victim = this._idleVictim(Date.now());
+    if (victim === null) {
+      await this._waitForCapacity();
+      // A waiter woken by dispose() must not proceed.
+      if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
+      victim = this._lruIdleVictim();
+    }
+    if (victim === null) {
+      throw new SshError({
+        hostId: cfg?.id ?? '',
+        stage: 'pool-capacity',
+        message: 'too many open SSH connections (max ' + this.maxConnections + '); close a session and retry',
+      });
+    }
+    await this._evictConn(victim);
   }
 
   /** Connect one host, tunnelling through its configured jump host first. */
@@ -808,17 +925,14 @@ export class SshPool {
       if (existing._dead) {
         await this.invalidate(id);
       } else {
+        existing.lastUsed = Date.now();
         return existing.connect(); // reuse open conn; idempotent connect()
       }
     }
-    if (this.conns.size >= this.maxConnections) {
-      await new Promise((r) => this.waiters.push(r));
-      // A waiter woken by dispose() must not proceed: re-check after the await so a
-      // disposed pool never hands out a new connection.
-      if (this.disposed) throw new SshError({ hostId: cfg?.id ?? '', stage: 'pool-disposed', message: 'ssh pool is disposed' });
-    }
+    await this._ensureCapacity(cfg);
     const sock = await this._sock(cfg, seen);
     const conn = new SshConn(cfg, { sock });
+    conn.lastUsed = Date.now();
     this.conns.set(id, conn);
     try {
       return await conn.connect();
@@ -829,7 +943,8 @@ export class SshPool {
   }
 
   // Keep the connection open for reuse; wake one waiter (capacity freed).
-  release() {
+  release(conn) {
+    if (conn && typeof conn === 'object') conn.lastUsed = Date.now();
     const w = this.waiters.shift();
     if (w) w();
   }

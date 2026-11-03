@@ -4,13 +4,12 @@
 // official Typert gateway for the settings-page "test connection" button
 // (the UI lives client-side).
 import { Service } from '@deepseek-ai/cordis';
-import os from 'node:os';
 import path from 'node:path';
 import { rm } from 'node:fs/promises';
 import { SshPool } from './src/ssh/pool.js';
 import { openHostsDomain } from './src/hosts/domain.js';
 import { registerRemote } from './src/remote/service.js';
-import { routeByCwd } from './src/workspace/router.js';
+import { routeByCwd, remoteRoot } from './src/workspace/router.js';
 import { registerRoutedTools, ROUTED_TOOL_NAMES } from './tools/index.js';
 import { installUiBridge } from './src/compat/ui-bridge.js';
 
@@ -52,8 +51,9 @@ export class SshPoolService extends Service {
 // put/create carry the record (record.value.path or change.value.path); deleted/delete
 // carry only the key (so an id→localPath map must be kept locally).
 export function installPlaceholderCleanup(ctx, opts = {}) {
-  const placeholderRoot = opts.placeholderRoot
-    ?? (process.env.DSH_HOME ? path.join(process.env.DSH_HOME, 'remote') : path.join(os.homedir(), '.dsh', 'remote'));
+  // Same root the router/creation path uses (DSH_SSH_REMOTE_ROOT > DSH_HOME > ~/.dsh);
+  // deriving it independently made deletes miss placeholders under a custom root.
+  const placeholderRoot = opts.placeholderRoot ?? remoteRoot(process.env);
   const rmImpl = opts.rm ?? rm;
   const byWorkspace = new Map(); // workspaceId → localPath
   const handler = (change) => {
@@ -75,6 +75,24 @@ export function installPlaceholderCleanup(ctx, opts = {}) {
       }
     }
   };
+  // A placeholder created in an earlier process has no live `put` event to learn
+  // from; seed the map from the registry so its later delete still cleans up.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['workspaceRegistry'], (scope) => {
+      try {
+        const registry = scope && scope.workspaceRegistry;
+        if (!registry || typeof registry.list !== 'function') return;
+        for (const entity of registry.list()) {
+          const localPath = entity && typeof entity.path === 'string' ? entity.path : '';
+          if (entity && entity.id && localPath.startsWith(placeholderRoot + path.sep)) {
+            byWorkspace.set(String(entity.id), localPath);
+          }
+        }
+      } catch {
+        // Registry not ready: live events still cover workspaces created later.
+      }
+    });
+  }
   const dispose = ctx.on('domain/changed', handler);
   ctx.effect(() => dispose, 'dsh-ssh-toolkit: placeholder cleanup');
   return { placeholderRoot, byWorkspace };

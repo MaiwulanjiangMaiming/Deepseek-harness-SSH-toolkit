@@ -31,6 +31,9 @@ function makeFakeConn({ initial = {}, dirs = [] } = {}) {
       if (!b) return run(1, '', 'no such file');
       return run(0, b.subarray(skip, skip + count).toString('base64'));
     }
+    // empty write: : > 'tmp'
+    m = /^: > ('[^']*')$/.exec(cmd);
+    if (m) { files.set(unquote(m[1]), Buffer.alloc(0)); return run(0); }
     // base64 chunked write/append: printf '%s' '<b64>' | base64 -d >|>> 'tmp'
     m = /^printf '%s' ('[^']*') \| base64 -d (>>|>) ('[^']*')$/.exec(cmd);
     if (m) {
@@ -208,4 +211,21 @@ test('fs(): first sftp() throws a different error → still falls back (promise 
   const f = await conn.fs();
   assert.equal(f.kind, 'exec');
   assert.equal(conn._sftpPromise, null);
+});
+
+test('ExecFs.readBytes: offset/length read only the requested window', async () => {
+  const conn = makeFakeConn({ initial: { '/f': '0123456789' } });
+  const fs = new ExecFs(conn);
+  const buf = await fs.readBytes('/f', { offset: 3, length: 4, chunkBytes: 2 });
+  assert.equal(buf.toString('utf8'), '3456');
+  // Reading past EOF yields an empty buffer, not an error.
+  const empty = await fs.readBytes('/f', { offset: 100, length: 5 });
+  assert.equal(empty.length, 0);
+});
+
+test('ExecFs.writeFileAtomic: empty content produces an empty file', async () => {
+  const conn = makeFakeConn({ dirs: ['/d'] });
+  const fs = new ExecFs(conn);
+  await fs.writeFileAtomic('/d/empty', Buffer.alloc(0));
+  assert.equal((await fs.readBytes('/d/empty')).length, 0);
 });

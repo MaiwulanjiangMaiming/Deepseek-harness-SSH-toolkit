@@ -74,3 +74,15 @@ test('create/delete operation words are also supported', async () => {
   assert.equal(removed.length, 1);
   assert.equal(removed[0], localPath);
 });
+
+test('default placeholder root follows DSH_SSH_REMOTE_ROOT', () => {
+  const previous = process.env.DSH_SSH_REMOTE_ROOT;
+  process.env.DSH_SSH_REMOTE_ROOT = '/tmp/dsh-cleanup-custom-root';
+  try {
+    const inst = installPlaceholderCleanup(makeCtx(), {});
+    assert.equal(inst.placeholderRoot, '/tmp/dsh-cleanup-custom-root');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_SSH_REMOTE_ROOT;
+    else process.env.DSH_SSH_REMOTE_ROOT = previous;
+  }
+});

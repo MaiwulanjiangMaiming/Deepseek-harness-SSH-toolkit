@@ -24,7 +24,9 @@
 
 | | |
 |---|---|
-| **主机管理** | 设置页增删改、测试连接，可选跳板机；口令在 UI 侧只写不回显。 |
+| **主机管理** | 设置页增删改、测试连接（走跳板链路），可选跳板机；口令在 UI 侧只写不回显。 |
+| **工作区识别** | 侧栏远程工作区带在线/离线圆点、服务器图标和主机 tag；目录选择器支持输入筛选、固定宽度。 |
+| **更新检查** | 设置 → SSH 底部显示当前版本，仓库有新 tag 时提示并给出 Release 链接（6 小时缓存）。 |
 | **多跳** | 通过引用另一台已配置主机的 `ProxyJump` 链路（带环检测），或在本机执行 OpenSSH 风格的 `ProxyCommand`；终端同样用 `ssh -J` / `-o ProxyCommand`。 |
 | **配置导入** | 扫描 `~/.ssh/config`（含 `config.d`、`Include`）批量导入；缺 `User` 的条目会明确禁用而不是导进来跑不通。 |
 | **七个工具远端执行** | `bash`、`read`、`write`、`edit`、`read_image`、`glob`、`grep`，schema 不变。 |
@@ -69,6 +71,9 @@ headless web 用 `--profile web`。若 pnpm 报 `ERR_PNPM_ADDING_TO_ROOT`，命�
 插件是纯附加的：本地工作区行为不变；`dsh plugin --profile desktop remove dsh-ssh-toolkit`
 即可完全移除。
 
+更新是手动的：DSH 只给官方插件提供 Update 按钮，第三方插件需要重新拉取/重装后完全重启。
+设置 → SSH 底部会显示当前版本；仓库出现更新的 tag 时变成「有新版本 vX.Y.Z」（最多 6 小时检查一次）。
+
 ## 快速上手
 
 1. 设置 → SSH 连接 → **从 ~/.ssh/config 导入**（或**添加主机**）。
@@ -91,7 +96,7 @@ src/workspace/        router.js（占位路径）、placeholder.js
 src/jobs.js           远端后台任务
 src/policy.js         sandbox 围栏
 src/compat/           UI 桥接：右栏 Files / 终端
-test/                 307 个单元测试（node:test）
+test/                 338 个单元测试（node:test）
 ```
 
 主机以记录形式存于 `dsh_ssh_hosts` storage domain

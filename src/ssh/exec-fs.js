@@ -100,9 +100,11 @@ export class ExecFs {
     if (st === undefined) throw this._err('read', p, 'no such file');
     const chunk = opts.chunkBytes ?? this.readChunkBytes;
     const total = st.size ?? 0;
+    const start = Math.max(0, Number(opts.offset) || 0);
+    const end = opts.length === undefined ? total : Math.min(total, start + Math.max(0, Number(opts.length) || 0));
     const out = [];
-    for (let off = 0; off < total; off += chunk) {
-      const n = Math.min(chunk, total - off);
+    for (let off = start; off < end; off += chunk) {
+      const n = Math.min(chunk, end - off);
       const cmd = 'dd if=' + shellQuoteSingle(p)
         + ' iflag=skip_bytes,count_bytes bs=131072 skip=' + off + ' count=' + n
         + ' 2>/dev/null | base64 -w0';
@@ -129,13 +131,19 @@ export class ExecFs {
     const base = slash >= 0 ? p.slice(slash + 1) : p;
     const tmp = dir + '.dsh-tmp-' + base + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     try {
-      const b64 = buf.toString('base64'); // encode once, then slice into 4-aligned chunks
-      const chunkChars = Math.max(4, Math.floor(this.writeChunkBytes / 3) * 4);
-      for (let i = 0; i < b64.length; i += chunkChars) {
-        const piece = b64.slice(i, i + chunkChars);
-        const redir = i === 0 ? '>' : '>>';
-        const cmd = "printf '%s' " + shellQuoteSingle(piece) + ' | base64 -d ' + redir + ' ' + shellQuoteSingle(tmp);
-        await this._exec(cmd, 'write', tmp);
+      if (buf.length === 0) {
+        // No payload means no base64 chunks; create the temp file explicitly or the
+        // rename below fails on a remote without SFTP.
+        await this._exec(': > ' + shellQuoteSingle(tmp), 'write', tmp);
+      } else {
+        const b64 = buf.toString('base64'); // encode once, then slice into 4-aligned chunks
+        const chunkChars = Math.max(4, Math.floor(this.writeChunkBytes / 3) * 4);
+        for (let i = 0; i < b64.length; i += chunkChars) {
+          const piece = b64.slice(i, i + chunkChars);
+          const redir = i === 0 ? '>' : '>>';
+          const cmd = "printf '%s' " + shellQuoteSingle(piece) + ' | base64 -d ' + redir + ' ' + shellQuoteSingle(tmp);
+          await this._exec(cmd, 'write', tmp);
+        }
       }
       await this._exec('mv -f ' + shellQuoteSingle(tmp) + ' ' + shellQuoteSingle(p), 'rename', tmp + ' -> ' + p);
     } catch (err) {

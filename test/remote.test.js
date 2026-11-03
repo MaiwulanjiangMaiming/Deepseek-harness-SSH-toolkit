@@ -727,3 +727,52 @@ test('saveHost clears a stored jump host / ProxyCommand when the form sends them
   assert.equal('proxyCommand' in saved, false);
   ctx.dispose?.();
 });
+
+test('testConnection forwards the jump host to the pool (settings test follows the chain)', async () => {
+  const ctx = new Context();
+  const calls = [];
+  const pool = { testConnection: async (cfg) => { calls.push(cfg); return { ok: true, banner: 'ok' }; } };
+  const svc = new SshRemoteService(ctx, pool);
+  svc.setStoredResolver((id) => (id === 'h1' ? { id: 'h1', host: 'target', user: 'u', auth: { type: 'key' }, proxyJump: 'jump-1' } : undefined));
+  await svc.testConnection({ cfg: { id: 'h1', host: 'target', user: 'u', auth: { type: 'key' }, proxyJump: 'jump-1' } });
+  assert.equal(calls[0].proxyJump, 'jump-1');
+  // Clearing the jump in the editor tests a direct connection, not the stored jump.
+  await svc.testConnection({ cfg: { id: 'h1', host: 'target', user: 'u', auth: { type: 'key' }, proxyJump: '' } });
+  assert.equal('proxyJump' in calls[1], false);
+  ctx.dispose?.();
+});
+
+test('checkUpdate caches a failure briefly instead of hammering GitHub', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, {});
+  let calls = 0;
+  svc.fetchImpl = async () => { calls += 1; throw new Error('offline'); };
+  await svc.checkUpdate();
+  await svc.checkUpdate();
+  assert.equal(calls, 1);
+  // force still re-reads (manual refresh path).
+  await svc.checkUpdate(true);
+  assert.equal(calls, 2);
+  ctx.dispose?.();
+});
+
+test('checkUpdate de-duplicates concurrent probes', async () => {
+  const ctx = new Context();
+  const svc = new SshRemoteService(ctx, {});
+  let calls = 0;
+  let release;
+  svc.fetchImpl = () => {
+    calls += 1;
+    return new Promise((resolve) => {
+      release = () => resolve({ ok: true, status: 200, json: async () => [{ name: 'v1.4.3' }] });
+    });
+  };
+  const first = svc.checkUpdate(true);
+  const second = svc.checkUpdate(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(calls, 1);
+  assert.equal(a, b);
+  ctx.dispose?.();
+});

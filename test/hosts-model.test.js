@@ -238,3 +238,29 @@ test('mergeHostPatch: a jump host can be replaced, not only removed', () => {
   const next = mergeHostPatch(stored, { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' }, proxyJump: 'new-jump' }, 'h1');
   assert.equal(next.proxyJump, 'new-jump');
 });
+
+test('mergeTestConfig: carries ProxyJump / ProxyCommand into the test connection', () => {
+  const stored = { id: 'h1', host: 'target', user: 'u', auth: { type: 'key' }, proxyJump: 'jump-1' };
+  // The form's current values win (testing what the editor shows).
+  const typed = mergeTestConfig({ id: 'h1', host: 'target', user: 'u', proxyJump: 'jump-2', proxyCommand: 'ssh -W %h:%p bastion' }, stored);
+  assert.equal(typed.proxyJump, 'jump-2');
+  assert.equal(typed.proxyCommand, 'ssh -W %h:%p bastion');
+  // Omitted fields fall back to the stored topology (partial config).
+  const fallback = mergeTestConfig({ id: 'h1', host: 'target', user: 'u' }, stored);
+  assert.equal(fallback.proxyJump, 'jump-1');
+  // Explicit '' clears it: the user asked to test a direct connection.
+  const cleared = mergeTestConfig({ id: 'h1', host: 'target', user: 'u', proxyJump: '', proxyCommand: '' }, stored);
+  assert.equal('proxyJump' in cleared, false);
+  assert.equal('proxyCommand' in cleared, false);
+});
+
+test('validateHostConfig rejects control characters that could inject into known_hosts', () => {
+  const base = { id: 'h1', name: 'box', host: 'h', port: 22, user: 'u', auth: { type: 'key' } };
+  assert.equal(validateHostConfig(base).ok, true);
+  const newline = validateHostConfig({ ...base, host: 'h\nssh-ed25519 AAAA' });
+  assert.equal(newline.ok, false);
+  assert.equal(newline.errors.host, 'controlChars');
+  assert.equal(validateHostConfig({ ...base, user: 'u\nx' }).ok, false);
+  assert.equal(validateHostConfig({ ...base, name: 'n\u0000' }).ok, false);
+  assert.equal(validateHostConfig({ ...base, knownHostsPath: '/tmp/x\n' }).ok, false);
+});
