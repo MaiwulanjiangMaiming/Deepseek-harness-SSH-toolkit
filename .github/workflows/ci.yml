@@ -27,6 +27,8 @@ jobs:
   pack:
     runs-on: ubuntu-latest
     needs: test
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -38,6 +40,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm pack
+      # A tag is a release: publish the installable .tgz next to GitHub's source
+      # archives, so users can `dsh plugin add <tarball URL>` instead of cloning.
+      - name: Attach the tarball to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" ./*.tgz --clobber
       - uses: actions/upload-artifact@v4
         with:
           name: tarball

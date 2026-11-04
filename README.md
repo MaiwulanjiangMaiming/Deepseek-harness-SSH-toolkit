@@ -83,6 +83,22 @@ pull/reinstall the package and fully restart. Settings → SSH shows the install
 version and turns the footer into "Update available: vX.Y.Z" when a newer tag
 exists on the repository (checked at most once per 6 hours).
 
+Install the version you want from its tag, or from the `.tgz` attached to the
+GitHub release (the auto-generated "Source code" archives on that page are not
+installable packages):
+
+```bash
+# by tag
+dsh plugin --profile desktop add github:MaiwulanjiangMaiming/Deepseek-harness-SSH-toolkit#v1.4.4
+# or the release asset (local file or URL)
+dsh plugin --profile desktop add ~/Downloads/dsh-ssh-toolkit-1.4.4.tgz
+```
+
+If the profile refuses to replace an already-installed copy, remove it first
+(`dsh plugin --profile desktop remove dsh-ssh-toolkit`) and add the new one.
+For a `link:`/checkout install (the development setup), `git pull` in the
+checkout is the update; the client bundle is read from disk on the next start.
+
 ## Quick start
 
 1. Settings → SSH Connections → **Import from ~/.ssh/config** (or **Add host**).

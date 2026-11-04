@@ -74,6 +74,18 @@ headless web 用 `--profile web`。若 pnpm 报 `ERR_PNPM_ADDING_TO_ROOT`，命�
 更新是手动的：DSH 只给官方插件提供 Update 按钮，第三方插件需要重新拉取/重装后完全重启。
 设置 → SSH 底部会显示当前版本；仓库出现更新的 tag 时变成「有新版本 vX.Y.Z」（最多 6 小时检查一次）。
 
+按 tag 或 Release 里的 `.tgz` 安装指定版本（Release 页自动生成的 “Source code” 压缩包不是可安装包）：
+
+```bash
+# 按 tag
+dsh plugin --profile desktop add github:MaiwulanjiangMaiming/Deepseek-harness-SSH-toolkit#v1.4.4
+# 或用 Release 附件（本地文件或 URL）
+dsh plugin --profile desktop add ~/Downloads/dsh-ssh-toolkit-1.4.4.tgz
+```
+
+如果 profile 拒绝覆盖已安装的版本，先 `dsh plugin --profile desktop remove dsh-ssh-toolkit` 再加。
+`link:`/本地 checkout 的开发方式就是 `git pull`，客户端 bundle 在下次启动时从磁盘读取。
+
 ## 快速上手
 
 1. 设置 → SSH 连接 → **从 ~/.ssh/config 导入**（或**添加主机**）。
