@@ -96,6 +96,17 @@ dsh plugin --profile desktop add ~/Downloads/dsh-ssh-toolkit-1.4.4.tgz
 
 If the profile refuses to replace an already-installed copy, remove it first
 (`dsh plugin --profile desktop remove dsh-ssh-toolkit`) and add the new one.
+
+If pnpm stops with `ERR_PNPM_IGNORED_BUILDS` / "Ignored build scripts:
+cpu-features, ssh2", the profile's `pnpm-workspace.yaml` has undecided build
+entries. Decide them explicitly and re-run the install (ssh2 works without the
+optional native addon, so `false` is the quick path; `true` needs a C++ toolchain):
+
+```yaml
+allowBuilds:
+  cpu-features: false
+  ssh2: false
+```
 For a `link:`/checkout install (the development setup), `git pull` in the
 checkout is the update; the client bundle is read from disk on the next start.
 

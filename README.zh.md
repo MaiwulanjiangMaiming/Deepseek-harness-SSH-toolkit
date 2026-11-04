@@ -84,6 +84,16 @@ dsh plugin --profile desktop add ~/Downloads/dsh-ssh-toolkit-1.4.4.tgz
 ```
 
 如果 profile 拒绝覆盖已安装的版本，先 `dsh plugin --profile desktop remove dsh-ssh-toolkit` 再加。
+
+如果 pnpm 报 `ERR_PNPM_IGNORED_BUILDS` / “Ignored build scripts: cpu-features, ssh2”，
+说明 profile 的 `pnpm-workspace.yaml` 里对应构建项还没决定。显式选一个再重装
+（ssh2 没有这个可选原生模块也能跑，选 `false` 最省事；选 `true` 需要 C++ 工具链）：
+
+```yaml
+allowBuilds:
+  cpu-features: false
+  ssh2: false
+```
 `link:`/本地 checkout 的开发方式就是 `git pull`，客户端 bundle 在下次启动时从磁盘读取。
 
 ## 快速上手
