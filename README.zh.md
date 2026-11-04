@@ -44,7 +44,7 @@
 
 | | |
 |---|---|
-| DSH | `0.2.1-rc.5`（desktop / web profile） |
+| DSH | 0.2.1-rc.4 – 0.2.x（rc.5 实测，rc.4 已审计） |
 | Node | ≥ 22 |
 | 远端系统 | Linux 或 macOS（只需 `sshd`，无需装 agent） |
 | 认证 | 密钥（路径或 ssh-agent）或口令 |

@@ -50,7 +50,7 @@ An independent, DSH 0.2-native continuation of
 
 | | |
 |---|---|
-| DSH | `0.2.1-rc.5` (desktop and web profiles) |
+| DSH | 0.2.1-rc.4 – 0.2.x (rc.5 tested, rc.4 audited) |
 | Node | ≥ 22 |
 | Remote OS | Linux or macOS (`sshd` only, no agent to install) |
 | Auth | key (path or ssh-agent) or password |

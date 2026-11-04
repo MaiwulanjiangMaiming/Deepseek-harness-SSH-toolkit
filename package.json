@@ -1,10 +1,11 @@
 {
   "name": "dsh-ssh-toolkit",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "SSH remote workspaces for DeepSeek Harness — run sessions on a remote machine.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.4 <0.3.0"
   },
   "main": "index.js",
   "exports": {
@@ -43,13 +44,13 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-fs": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-sandbox": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-shell": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-storage-domain": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-tools": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.5"
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.1-rc.4 <0.3.0",
+    "@deepseek-ai/dsh-fs": ">=0.2.1-rc.4 <0.3.0",
+    "@deepseek-ai/dsh-sandbox": ">=0.2.1-rc.4 <0.3.0",
+    "@deepseek-ai/dsh-shell": ">=0.2.1-rc.4 <0.3.0",
+    "@deepseek-ai/dsh-storage-domain": ">=0.2.1-rc.4 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.4 <0.3.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.4 <0.3.0"
   },
   "dependencies": {
     "diff": "^9.0.0",
